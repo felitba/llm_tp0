@@ -13,9 +13,9 @@ def split_dataset(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     """Split the dataset into train/validation/test using ratios from config.json."""
     config = load_config()
 
-    train_ratio = float(config.get("train_split", 1.0))
-    valid_ratio = float(config.get("validation_split", 0.0))
-    test_ratio = float(config.get("test_split", 0.0))
+    train_ratio = float(config.get("train_split"))
+    valid_ratio = float(config.get("validation_split"))
+    test_ratio = float(config.get("test_split"))
 
     if not (train_ratio + valid_ratio + test_ratio > 0):
         raise ValueError("Split ratios must sum to a positive value.")
