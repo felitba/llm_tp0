@@ -1,0 +1,31 @@
+Observaciones del dataset
+
+Target columns: bought
+
+Columns to process/train:
+title: se podria preprocesar para almacenar en columnas distintas el nombre del producto en si, y los comentarios acerca de la misma.
+    Justificación:
+        dado que notamos que el usuario ha comprado en la mayoria de los casos productos Customer Favorite, Well Received, etc.
+
+price.
+category.
+storage type.
+filter price min, filter price max.
+brand.
+net weight oz.
+ingredients.
+allergens.
+nutrition score.
+country of origin.
+
+
+Dropped columns:
+description (es informacion repetida entre las otras columnas).
+filter category: cuando buscas por ejemplo por congelados, te van a aparecer solamente congelados, logicamente. Hay columna repetida
+                con category. Lo mismo ocurre con filter storage type.
+package size, unit of measure: nos parece mas facil comparar todo en oz.
+dimension in : tiene q ver ya con package size. lo ignoramos.
+
+
+Dudosos: timestamp, query id.
+
