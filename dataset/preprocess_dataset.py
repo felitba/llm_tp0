@@ -35,10 +35,54 @@ def split_dataset(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     }
     return splits
 
-def get_data_splitted() -> Dict[str, pd.DataFrame]:
+def get_data_normalized_encoded_splitted() -> Dict[str, pd.DataFrame]:
     """Load data and return train/validation/test splits according to config.json."""
-    return split_dataset(get_raw_dataset())
+    df = get_raw_dataset()
+    df = drop_columns(df)
+    df = normalize_data(df)
+    df = one_hot_encode_data(df)
+    return split_dataset(df)
 
+def drop_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the columns specified in config.json."""
+    columns = load_config().get("drop_columns", [])
+    if isinstance(columns, str):
+        columns = [column.strip() for column in columns.split(",") if column.strip()]
+
+    return df.drop(columns=columns, errors="ignore")
+
+def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize the dataset using min-max normalization."""
+    columns = load_config().get("normalize_columns", [])
+    if isinstance(columns, str):
+        columns = [column.strip() for column in columns.split(",") if column.strip()]
+
+    if columns:
+        df[columns] = (df[columns] - df[columns].min()) / (
+            df[columns].max() - df[columns].min()
+        )
+    return df
+
+def one_hot_encode_data(df: pd.DataFrame) -> pd.DataFrame:
+    """One-hot encode the categorical columns configured in config.json."""
+    columns = load_config().get("one_hot_columns", [])
+    if isinstance(columns, str):
+        columns = [column.strip() for column in columns.split(",") if column.strip()]
+
+    for column in columns:
+        encoded = pd.get_dummies(df[column], dtype=int)
+        df[column] = encoded.to_numpy().tolist()
+
+    return df
 
 if __name__ == "__main__":
-    print({key: len(value) for key, value in get_data_splitted().items()})
+    # print({key: (value) for key, value in get_data_normalized_encoded_splitted().items()})
+    splits = get_data_normalized_encoded_splitted()
+    with pd.option_context(
+        "display.max_rows", None,
+        "display.max_columns", None,
+        "display.width", None,
+        "display.max_colwidth", None,
+    ):
+        for key, value in splits.items():
+            print(f"{key}:\n{value.head(2).to_string(index=False)}\n")

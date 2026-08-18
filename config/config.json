@@ -12,5 +12,8 @@
   "dropout": 0.1,
   "activation": "relu",
   "encoding": "gpt2",
-  "dim_feedforward": 2048
+  "dim_feedforward": 2048,
+  "one_hot_columns":["category", "storage_type", "brand", "country_of_origin", "allergens"],
+  "drop_columns":["description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "query_id", "timestamp"],
+  "normalize_columns":["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"]
 }
