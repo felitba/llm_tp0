@@ -30,5 +30,5 @@ package size, unit of measure: nos parece mas facil comparar todo en oz.
 dimension in : tiene q ver ya con package size. lo ignoramos.
 
 
-Dudosos: timestamp, query id.
+Dudosos: timestamp, query id, nutrition score. 
 

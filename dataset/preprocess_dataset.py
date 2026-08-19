@@ -4,6 +4,7 @@ from pathlib import Path
 from config.config import load_config
 
 import pandas as pd
+from dataset.print_processed_data import write_processed_data_report
 
 def get_raw_dataset() -> pd.DataFrame:
     """Load the supermarket products dataset."""
@@ -102,7 +103,7 @@ def one_hot_encode_data(df: pd.DataFrame) -> pd.DataFrame:
 def process_title_column(df: pd.DataFrame)-> pd.DataFrame:
     """ parse the title column, extracting into new columns: product name and comments.
     Example: Harvest Lane Family Pack Blueberry Muffins - 8 ct (Customer Favorite)"""
-    df = df.copy()
+   
     # Remove the brand prefix from the title, then keep the text before the "-".
     brand = df["brand"].fillna("").astype(str).str.strip()
     title = df["title"].fillna("").astype(str).str.strip()
@@ -125,38 +126,5 @@ def process_title_column(df: pd.DataFrame)-> pd.DataFrame:
 
 if __name__ == "__main__":
     splits = get_data_processed()
-
-    #Previsualize the data processed in a txt file.
-    report_lines = []
-    for key, value in splits.items():
-        report_lines.append("=" * 100)
-        report_lines.append(f"{key.upper()} | rows={len(value):,} cols={value.shape[1]}")
-        if key == "train":
-            mapping = value.attrs.get("one_hot_encoding_mapping", {})
-            report_lines.append("One-hot encoding mapping (vector index -> category):")
-            if mapping:
-                for column, column_mapping in mapping.items():
-                    report_lines.append(f"  {column}: {column_mapping}")
-            else:
-                report_lines.append("  No one-hot encoded columns")
-        if "bought" in value.columns:
-            bought_ratio = value["bought"].astype(bool).mean()
-            report_lines.append(
-                f"bought=True ratio (bought=True rows / total rows): {bought_ratio:.2%}"
-            )
-        report_lines.append("-" * 100)
-        preview = value.head(50)
-        first_columns = [
-            column for column in ("product_name", "comments") if column in preview.columns
-        ]
-        remaining_columns = [
-            column for column in preview.columns if column not in first_columns
-        ]
-        report_lines.append(
-            preview[first_columns + remaining_columns].to_string(index=False)
-        )
-        report_lines.append("")
-
-    report_path = Path(__file__).with_name("preprocess_dataset_report.txt")
-    report_path.write_text("\n".join(report_lines), encoding="utf-8")
+    report_path = write_processed_data_report(splits)
     print(f"Dataset report written to: {report_path}")
