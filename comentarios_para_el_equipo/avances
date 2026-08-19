@@ -15,7 +15,10 @@ brand.
 net weight oz.
 ingredients.
 allergens.
+
+# Aca ojo con nutrition score, hay varios que no tienen. 
 nutrition score.
+
 country of origin.
 
 
