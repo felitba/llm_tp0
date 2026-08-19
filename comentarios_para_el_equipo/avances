@@ -32,3 +32,29 @@ dimension in : tiene q ver ya con package size. lo ignoramos.
 
 Dudosos: timestamp, query id, nutrition score. 
 
+Graficos: pr_auc
+# Bueno, les explico aca en casero lo que significa pr auc. 
+# Nosotros cuando tenemos un algoritmo de prediccion, el transformer devuelve una probabilidad.
+# Ej. 80% de que el producto sea comprado...
+# Si threshold = 0.9, como threshold > output entonces predecimos que no va a ser comprado.
+# Si threshold = 0.7, como threshold < output entonces predecimos que va a ser comprado.
+# Distintos thresholds implican que hayan distintos valores de precision, y recall (al variar true positive, false positive, etc)
+
+# PR-AUC lo que hace es variar el threshold de a 0.05 por ejemplo, y clacular prec. y recall. 
+# eso lo muestra en un grafico. 
+
+El valor que devuelve pr auc es el area bajo la curva. Eso lo calcula una libreria que usamos. 
+Responde a la pregunta de “Can my model find a large proportion of the real BTR cases without generating too many false BTR predictions?”
+El caso ideal seria cuando 
+Precision
+1.0 |──────────────────────●
+    |                      │
+    |                      │
+    |                      │
+    |                      │
+0.0 +──────────────────────┼──→ Recall
+    0                      1
+
+Entonces mientras mas cercano a 1 sea, mejor. Caso ideal sigue siendo cuando el modelo asigna un BTR tendiente a cero 
+para aquellos casos que no sean probables a comprar, y tendiente a 1 para aquellos casos que si.
+Digamos que puede decir firmemente si va comprar o no.
