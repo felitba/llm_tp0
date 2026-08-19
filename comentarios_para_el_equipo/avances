@@ -46,15 +46,37 @@ Graficos: pr_auc
 El valor que devuelve pr auc es el area bajo la curva. Eso lo calcula una libreria que usamos. 
 Responde a la pregunta de “Can my model find a large proportion of the real BTR cases without generating too many false BTR predictions?”
 El caso ideal seria cuando 
+
+precision = TP/(TP+FP)	​
+recall = TP/(TP+FN)	​
 Precision
-1.0 |──────────────────────●
-    |                      │
-    |                      │
-    |                      │
-    |                      │
-0.0 +──────────────────────┼──→ Recall
+1.0 | ●───────────────●
+    | │               /
+    | │             /
+    | │           /
+    | │         /
+0.0 | ●───────────────
+    +----------------------→ Recall
     0                      1
 
 Entonces mientras mas cercano a 1 sea, mejor. Caso ideal sigue siendo cuando el modelo asigna un BTR tendiente a cero 
 para aquellos casos que no sean probables a comprar, y tendiente a 1 para aquellos casos que si.
 Digamos que puede decir firmemente si va comprar o no.
+
+ROC -this compares:
+Recall=TP/(TP+FN)
+
+And:
+
+FPR= FP/(FP+TN)	​
+TPR
+1.0 |──────────────────────●
+    |                      │
+    |                      │
+    |                      │
+    |                      │
+0.0 +──────────────────────┼──→ FPR
+    0                      1
+
+Aca el caso ideal seria cuando TPR tiende siempre a 1, y FPR a 0. Por tanto en el grafico, 
+por mas que varia FPR, TPR siempre es alto. Esto significa que el modelo es bueno para predecir los casos positivos, y no predice muchos falsos positivos.
