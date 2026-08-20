@@ -557,7 +557,167 @@ marca fuerte + categoria especifica -> puede influir
 storage_type + category -> consistencia del producto
 ```
 
-## 12. Arquitectura recomendada para la primera version
+## 12. Incorporar Masked Language Modeling
+
+Si se pide usar una estrategia tipo BERT, se puede incorporar **Masked Language Modeling** como una etapa previa de entrenamiento.
+
+MLM no predice `bought`. MLM entrena al Transformer a reconstruir tokens de texto ocultos.
+
+Ejemplo:
+
+```text
+Texto original:
+"low sodium pasta sauce"
+
+Texto enmascarado:
+"low [MASK] pasta sauce"
+
+Objetivo:
+predecir "sodium"
+```
+
+### Donde entra MLM en la arquitectura
+
+Se propone entrenar en dos etapas:
+
+```text
+Etapa 1: pretraining con MLM
+    texto + features opcionales
+        |
+        v
+    Transformer Encoder
+        |
+        v
+    MLM head
+        |
+        v
+    predecir tokens enmascarados
+
+Etapa 2: fine-tuning para BTR
+    texto + categoricas + numericas
+        |
+        v
+    Transformer Encoder preentrenado
+        |
+        v
+    classification head
+        |
+        v
+    predecir bought / BTR
+```
+
+La idea es reutilizar el mismo Transformer Encoder. En la primera etapa aprende representaciones del texto; en la segunda se ajusta para predecir compra.
+
+### Como se arma el input para MLM
+
+Para las columnas textuales:
+
+- `product_name`
+- `comments`
+- `ingredients`
+
+se tokeniza con el tokenizer custom acotado y se agrega un token especial:
+
+```text
+MASK
+```
+
+Luego se selecciona un porcentaje de tokens, por ejemplo `15%`, y se los oculta.
+
+Regla habitual de BERT:
+
+```text
+80% -> reemplazar por [MASK]
+10% -> reemplazar por un token random
+10% -> dejar igual
+```
+
+La loss se calcula solo sobre los tokens seleccionados para predecir. Los tokens no seleccionados y los tokens `PAD` se ignoran.
+
+### MLM head
+
+Durante pretraining, en lugar de usar la cabeza clasificadora de `bought`, se usa una cabeza que predice vocabulario:
+
+```python
+self.mlm_head = nn.Linear(d_model, vocab_size)
+```
+
+La salida tiene forma:
+
+```text
+[batch_size, seq_len, vocab_size]
+```
+
+La loss puede ser:
+
+```python
+loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
+```
+
+Donde `-100` marca posiciones que no deben participar de la loss.
+
+### Que pasa con las columnas no textuales?
+
+Hay dos opciones razonables:
+
+#### Opcion simple
+
+Hacer MLM solo con texto:
+
+```text
+product_name/comments/ingredients -> MLM
+```
+
+Luego, en fine-tuning, agregar categoricas y numericas para predecir `bought`.
+
+Esta opcion es mas simple y mas cercana a BERT clasico.
+
+#### Opcion multimodal
+
+Durante MLM, pasar tambien las features categoricas y numericas como contexto:
+
+```text
+[texto enmascarado] + [category] + [brand] + [price] + ...
+```
+
+La loss sigue calculandose solo sobre tokens de texto enmascarados, pero el Transformer puede usar columnas como marca, categoria o precio para reconstruir mejor el texto.
+
+Esta opcion esta mas alineada con la arquitectura final, pero es un poco mas compleja.
+
+### Diferencia entre MLM y BTR
+
+```text
+MLM:
+objetivo auto-supervisado
+predice tokens ocultos
+usa CrossEntropy sobre vocabulario
+
+BTR:
+objetivo supervisado
+predice bought
+usa BCEWithLogitsLoss
+```
+
+MLM sirve como pretraining. BTR es la tarea final.
+
+### Recomendacion para el TP
+
+Si se pide incorporar MLM, la version mas defendible seria:
+
+```text
+1. Tokenizer custom acotado.
+2. Learned embeddings para tokens.
+3. Transformer Encoder entrenado con MLM sobre columnas textuales.
+4. Reutilizar ese encoder en el modelo completo.
+5. Agregar categoricas y numericas.
+6. Fine-tuning con BCEWithLogitsLoss para predecir bought.
+```
+
+Esto permite decir que la arquitectura usa una etapa tipo BERT:
+
+> Primero se preentrena el encoder con Masked Language Modeling sobre el texto del producto. Luego se reutilizan sus pesos y se ajusta el modelo completo para la tarea supervisada de prediccion de BTR.
+
+## 13. Arquitectura recomendada para la primera version
 
 ```text
 Tokenizer acotado para texto
