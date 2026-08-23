@@ -1,27 +1,18 @@
-"""Precision-recall curve calculated over sampled thresholds."""
+"""Precision-recall curve computed with scikit-learn"""
 
 from collections.abc import Sequence
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import average_precision_score, precision_recall_curve
 
-from metrics.metrics import precision, recall
+
 from graph.threshold_curves import (
-	ConfusionCounts,
-	calculate_threshold_curve,
+	ThresholdCurve,
 	make_realistic_demo_samples,
 	plot_threshold_curve,
 )
-
-
-def _precision_from_counts(counts: ConfusionCounts) -> float:
-	if counts.true_positive + counts.false_positive == 0:
-		return 1.0
-	return precision(counts.true_positive, counts.false_positive)
-
-
-def _recall_from_counts(counts: ConfusionCounts) -> float:
-	return recall(counts.true_positive, counts.false_negative)
 
 def plot_pr_auc(
 	y_true: Sequence[int], y_scores: Sequence[float]
@@ -31,11 +22,14 @@ def plot_pr_auc(
 	``y_true`` contains binary labels and ``y_scores`` contains the score or
 	probability used for thresholding.
 	"""
-	curve = calculate_threshold_curve(
-		y_true=y_true,
-		y_scores=y_scores,
-		x_metric=_recall_from_counts,
-		y_metric=_precision_from_counts,
+	precision, recall, thresholds = precision_recall_curve(y_true, y_scores)
+	curve = ThresholdCurve(
+		# precision_recall_curve returns one more point than thresholds: the
+		# final (recall 0, precision 1) corner has no threshold behind it.
+		thresholds=np.append(thresholds, np.inf),
+		x_values=recall,
+		y_values=precision,
+		auc=float(average_precision_score(y_true, y_scores)),
 	)
 	return plot_threshold_curve(
 		curve=curve,

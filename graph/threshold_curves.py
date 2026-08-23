@@ -8,22 +8,11 @@ import numpy as np
 
 
 @dataclass(frozen=True)
-class ConfusionCounts:
-	true_positive: int
-	false_positive: int
-	true_negative: int
-	false_negative: int
-
-
-@dataclass(frozen=True)
 class ThresholdCurve:
 	thresholds: np.ndarray
 	x_values: np.ndarray
 	y_values: np.ndarray
 	auc: float
-
-
-MetricFromCounts = Callable[[ConfusionCounts], float]
 
 
 def make_realistic_demo_samples(
@@ -39,37 +28,6 @@ def make_realistic_demo_samples(
 	y_scores[positive_mask] = rng.beta(5.0, 2.5, size=int(np.sum(positive_mask)))
 	y_scores[negative_mask] = rng.beta(2.0, 5.0, size=int(np.sum(negative_mask)))
 	return y_true, y_scores
-
-
-def calculate_threshold_curve(
-	y_true: Sequence[int],
-	y_scores: Sequence[float],
-	x_metric: MetricFromCounts,
-	y_metric: MetricFromCounts,
-	thresholds: Sequence[float] | None = None,
-) -> ThresholdCurve:
-	"""Calculate curve points by varying the classification threshold."""
-	labels, scores = _validate_binary_inputs(y_true, y_scores)
-	if thresholds is None:
-		threshold_values = np.linspace(1.0, 0.0, 101)
-	else:
-		threshold_values = np.asarray(thresholds, dtype=float)
-
-	x_values = []
-	y_values = []
-	for threshold in threshold_values:
-		counts = _confusion_counts(labels, scores, threshold)
-		x_values.append(x_metric(counts))
-		y_values.append(y_metric(counts))
-
-	x_array = np.asarray(x_values, dtype=float)
-	y_array = np.asarray(y_values, dtype=float)
-	return ThresholdCurve(
-		thresholds=threshold_values,
-		x_values=x_array,
-		y_values=y_array,
-		auc=_area_under_curve(x_array, y_array),
-	)
 
 
 def plot_threshold_curve(
@@ -92,7 +50,10 @@ def plot_threshold_curve(
 		)
 	else:
 		axes.plot(curve.x_values, curve.y_values, label=f"{auc_label} = {curve.auc:.3f}")
-	axes.plot(curve.x_values, curve.y_values, "o", markersize=3)
+	# One marker per point was readable on the old 101-point grid. A real curve
+	# has one point per distinct score, so markers would bury the line.
+	if len(curve.x_values) <= 100:
+		axes.plot(curve.x_values, curve.y_values, "o", markersize=3)
 
 	if show_random_baseline:
 		axes.plot([0.0, 1.0], [0.0, 1.0], "--", color="gray", label="Random baseline")
@@ -106,35 +67,3 @@ def plot_threshold_curve(
 	axes.legend()
 	figure.tight_layout()
 	return figure, axes, curve.auc
-
-
-def _validate_binary_inputs(
-	y_true: Sequence[int], y_scores: Sequence[float]
-) -> tuple[np.ndarray, np.ndarray]:
-	if len(y_true) != len(y_scores):
-		raise ValueError("y_true and y_scores must have the same length")
-
-	labels = np.asarray(y_true)
-	if not np.isin(labels, [0, 1]).all():
-		raise ValueError("y_true must contain only binary labels: 0 and 1")
-
-	return labels, np.asarray(y_scores, dtype=float)
-
-
-def _confusion_counts(
-	labels: np.ndarray, scores: np.ndarray, threshold: float
-) -> ConfusionCounts:
-	predicted = scores >= threshold
-	positive_labels = labels == 1
-	negative_labels = labels == 0
-	return ConfusionCounts(
-		true_positive=int(np.sum(predicted & positive_labels)),
-		false_positive=int(np.sum(predicted & negative_labels)),
-		true_negative=int(np.sum(~predicted & negative_labels)),
-		false_negative=int(np.sum(~predicted & positive_labels)),
-	)
-
-
-def _area_under_curve(x_values: np.ndarray, y_values: np.ndarray) -> float:
-	order = np.argsort(x_values)
-	return float(np.trapezoid(y_values[order], x_values[order]))
