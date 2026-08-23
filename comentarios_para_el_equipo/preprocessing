@@ -1,0 +1,28 @@
+Changes made:
+
+* Now we assign QUERIES to splits instead of just slicing rows:
+1. aggregate to one row per query_id, with its bought count as stratum (0-4)
+2. shuffle once with seed so we get random query_id's from each bucket
+3. do the 80/10/10 train/val/test split for each stratum => bought rate stays even without cutting queries
+
+
+**The problem is that there there aren't enough queries for bucket 4 (only 5!!)
+and when we do the TRAIN/VAL/TEST split, test ends up getting 0 queries for the test.
+
+bought_count	queries
+0	            1058
+1	            670
+2	            226
+3	            53
+4	            5
+
+So instead, we merge queries of bought_count 3 & 4 (make MAX_BOUGHT_STRATUM=3)
+
+bought_count	queries
+0	            1058
+1	            670
+2	            226
+3+	            58
+
+
+* Added "None" as allegeren category for one-hot encoding.

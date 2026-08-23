@@ -1,62 +1,85 @@
 from __future__ import annotations
 from typing import Dict
 from pathlib import Path
-from config.config import load_config
+from config.config import load_config, resolve_path
 
+import numpy as np
 import pandas as pd
 from dataset.print_processed_data import write_processed_data_report
 
-def get_raw_dataset() -> pd.DataFrame:
-    """Load the supermarket products dataset."""
-    return pd.read_csv(load_config().get("dataset_path"))
+SPLIT_NAMES = ("train", "validation", "test")
+# Queries buying this many products or more are stratified as one group.
+MAX_BOUGHT_STRATUM = 3
 
-# helper function for split dataset. 
-def separate(group: pd.DataFrame, ratios: tuple[float, float, float]):
-    total = sum(ratios)
-    train_end = int(len(group) * ratios[0] / total)
-    valid_end = train_end + int(len(group) * ratios[1] / total)
-    return {
-        "train": group.iloc[:train_end],
-        "validation": group.iloc[train_end:valid_end],
-        "test": group.iloc[valid_end:],
-    }
+def get_raw_dataset() -> pd.DataFrame:
+    """Load the supermarket products dataset.
+
+    keep_default_na=False because "None" is a real allergens category (a product
+    with no allergens), and pandas' default na_values would read it as NaN.
+    """
+    return pd.read_csv(
+        resolve_path(load_config().get("dataset_path")), keep_default_na=False
+    )
+
+# helper function for split dataset.
+def separate(df: pd.DataFrame, ratios: tuple[float, float, float], seed: int) -> pd.Series:
+    """Assign every query_id to exactly one split, keeping the bought rate even.
+
+    The rows with the same query_id are the product shown for a single search,
+    so they should travel together (if we leave part of a query in train and the rest
+    in test, model might memorize that search instead of generalizing from it.)
+    
+    To keep splits comparable, queries are grouped by how many of their products
+    were bought and each group is dealt out in the same proportions.
+
+    Counts above MAX_BOUGHT_STRATUM share one group: only 5 queries bought 4
+    products, too few to divide 80/10/10 (test would get none of them).
+    """
+    queries = (
+        df.groupby("query_id")["bought"]
+        .sum()
+        .clip(upper=MAX_BOUGHT_STRATUM)
+        .rename("bought_count")
+        .sample(frac=1, random_state=seed)  # shuffle, otherwise splits follow file order
+        .reset_index()
+    )
+
+    # Position of each query within its group, as a fraction of that group.
+    group = queries.groupby("bought_count")["query_id"]
+    position = group.cumcount() / group.transform("size")
+
+    cutoffs = np.cumsum(np.array(ratios, dtype=float) / sum(ratios))[:-1]
+    split_index = np.searchsorted(cutoffs, position, side="right")
+    return pd.Series(np.array(SPLIT_NAMES)[split_index], index=queries["query_id"])
 
 def split_dataset(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     """Split the dataset into train/validation/test using ratios from config.json."""
     config = load_config()
 
-    default_ratios = (
+    ratios = (
         float(config.get("train_split")),
         float(config.get("validation_split")),
         float(config.get("test_split")),
     )
-    bought_ratios = (
-        float(config.get("target_column_train_perc", 0.8)),
-        float(config.get("target_column_valid_perc", 0.1)),
-        0.1,
-    )
+    split_of_query = separate(df, ratios, int(config.get("split_seed", 42)))
+    split_of_row = df["query_id"].map(split_of_query)
 
-    bought = df[df["bought"].astype(bool)]
-    not_bought = df[~df["bought"].astype(bool)]
-    bought_splits = separate(bought, bought_ratios)
-    not_bought_splits = separate(not_bought, default_ratios)
-    splits = {
-        name: pd.concat([bought_splits[name], not_bought_splits[name]]).copy()
-        for name in ("train", "validation", "test")
-    }
-    # Keep the category-to-vector-position mapping available on each split.
     mapping = df.attrs.get("one_hot_encoding_mapping", {})
-    for split in splits.values():
+    splits = {}
+    for name in SPLIT_NAMES:
+        split = df[split_of_row == name].copy()
+        # Keep the category-to-vector-position mapping available on each split.
         split.attrs["one_hot_encoding_mapping"] = mapping
+        splits[name] = split
     return splits
 
 def get_data_processed() -> Dict[str, pd.DataFrame]:
     """Load data and return train/validation/test splits according to config.json."""
     df = get_raw_dataset()
-    #TODO: define wether this is necessary or not. 
+    #TODO: define whether this is necessary or not. 
     df = process_title_column(df)
     df = drop_columns(df)
-    #TODO: define wether this is necessary or not. 
+    #TODO: define whether this is necessary or not. 
     # df = normalize_data(df)
     df = one_hot_encode_data(df)
     return split_dataset(df)
