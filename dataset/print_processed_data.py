@@ -32,7 +32,7 @@ def write_processed_data_report(
 		report_lines.append("-" * 100)
 		preview = value.head(50)
 		first_columns = [
-			column for column in ("product_name", "comments") if column in preview.columns
+			column for column in ("product_name", "title_tag") if column in preview.columns
 		]
 		remaining_columns = [
 			column for column in preview.columns if column not in first_columns

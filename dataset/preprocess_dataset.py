@@ -10,6 +10,8 @@ from dataset.print_processed_data import write_processed_data_report
 SPLIT_NAMES = ("train", "validation", "test")
 # Queries buying this many products or more are stratified as one group.
 MAX_BOUGHT_STRATUM = 3
+# Sentinel for listings who title carries no parenthetical tag
+NO_TAG = "No tag"
 
 def get_raw_dataset() -> pd.DataFrame:
     """Load the supermarket products dataset.
@@ -124,7 +126,7 @@ def one_hot_encode_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def process_title_column(df: pd.DataFrame)-> pd.DataFrame:
-    """ parse the title column, extracting into new columns: product name and comments.
+    """ parse the title column, extracting into new columns: product name and title_tag.
     Example: Harvest Lane Family Pack Blueberry Muffins - 8 ct (Customer Favorite)"""
    
     # Remove the brand prefix from the title, then keep the text before the "-".
@@ -144,7 +146,7 @@ def process_title_column(df: pd.DataFrame)-> pd.DataFrame:
         .str[0]
         .str.strip()
     )
-    df["comments"] = df["title"].str.extract(r"\((.*?)\)", expand=False)
+    df["title_tag"] = df["title"].str.extract(r"\((.*?)\)", expand=False).fillna(NO_TAG)
     return df
 
 if __name__ == "__main__":
