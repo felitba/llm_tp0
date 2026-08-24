@@ -12,6 +12,16 @@ SPLIT_NAMES = ("train", "validation", "test")
 MAX_BOUGHT_STRATUM = 3
 # Sentinel for listings who title carries no parenthetical tag
 NO_TAG = "No tag"
+# Id reserved for a category value that never appears in train. Real values start at 1.
+UNKNOWN_ID = 0
+
+
+def config_columns(key: str) -> list[str]:
+    """Read a column list from config.json, accepting a comma-separated string too."""
+    columns = load_config().get(key, [])
+    if isinstance(columns, str):
+        columns = [column.strip() for column in columns.split(",") if column.strip()]
+    return list(columns)
 
 def get_raw_dataset() -> pd.DataFrame:
     """Load the supermarket products dataset.
@@ -66,39 +76,47 @@ def split_dataset(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     split_of_query = separate(df, ratios, int(config.get("split_seed", 42)))
     split_of_row = df["query_id"].map(split_of_query)
 
-    mapping = df.attrs.get("one_hot_encoding_mapping", {})
-    splits = {}
-    for name in SPLIT_NAMES:
-        split = df[split_of_row == name].copy()
-        # Keep the category-to-vector-position mapping available on each split.
-        split.attrs["one_hot_encoding_mapping"] = mapping
-        splits[name] = split
-    return splits
+    return {name: df[split_of_row == name].copy() for name in SPLIT_NAMES}
 
 def get_data_processed() -> Dict[str, pd.DataFrame]:
-    """Load data and return train/validation/test splits according to config.json."""
+    """Load data and return train/validation/test splits according to config.json.
+
+    CHANGED (2026-08-24): the encoders used to run on the whole dataframe and the
+    split happened last, so validation/test values decided the encoding layout.
+    Now the split comes first and every encoder is fitted on train only.
+    To go back to the old order, move the encode calls above split_dataset and
+    have them take/return a single dataframe again (git history has that version).
+    """
     df = get_raw_dataset()
-    #TODO: define whether this is necessary or not. 
+    #TODO: define whether this is necessary or not.
     df = process_title_column(df)
     df = drop_columns(df)
-    #TODO: define whether this is necessary or not. 
-    # df = normalize_data(df)
-    df = one_hot_encode_data(df)
-    return split_dataset(df)
+
+    splits = split_dataset(df)
+    splits = encode_categorical_ids(splits)
+
+    # DECISION (2026-08-24): price and nutrition_score stay on their raw scale for
+    # now, so the first FT-Transformer run shows what the numeric tokens do without
+    # a scaling choice mixed into the result.
+    # When we do normalize, it belongs right here, and as three steps: fit the
+    # scaler on splits["train"] only, then apply those same frozen statistics to
+    # all three splits. Fitting before the split lets validation/test values set
+    # the scale the model trains on. normalize_data below is the old whole-frame
+    # version and would leak; rewrite it to take the splits before calling it.
+    return splits
 
 def drop_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Drop the columns specified in config.json."""
-    columns = load_config().get("drop_columns", [])
-    if isinstance(columns, str):
-        columns = [column.strip() for column in columns.split(",") if column.strip()]
-
-    return df.drop(columns=columns, errors="ignore")
+    return df.drop(columns=config_columns("drop_columns"), errors="ignore")
 
 def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize the dataset using min-max normalization."""
-    columns = load_config().get("normalize_columns", [])
-    if isinstance(columns, str):
-        columns = [column.strip() for column in columns.split(",") if column.strip()]
+    """Normalize the dataset using min-max normalization.
+
+    UNUSED (2026-08-24): kept for reference only. min()/max() over whatever frame
+    it is handed means calling it before the split fits the scale on validation and
+    test rows too. See the note in get_data_processed before wiring it back in.
+    """
+    columns = config_columns("normalize_columns")
 
     if columns:
         df[columns] = (df[columns] - df[columns].min()) / (
@@ -106,24 +124,48 @@ def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
         )
     return df
 
-def one_hot_encode_data(df: pd.DataFrame) -> pd.DataFrame:
-    """One-hot encode the categorical columns configured in config.json."""
-    columns = load_config().get("one_hot_columns", [])
-    if isinstance(columns, str):
-        columns = [column.strip() for column in columns.split(",") if column.strip()]
+def encode_categorical_ids(splits: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    """Replace each configured categorical column with the integer id nn.Embedding wants.
 
-    encoding_mapping = {}
-    for column in columns:
-        encoded = pd.get_dummies(df[column], dtype=int)
-        encoding_mapping[column] = {
-            vector_index: category
-            for vector_index, category in enumerate(encoded.columns)
+    CHANGED (2026-08-24): this replaces the one-hot encoding the pipeline used to
+    emit. An embedding lookup is already "select row id of a matrix", so one-hot
+    followed by a Linear would compute the same thing the long way round, and the
+    one-hot widths (12 for category, 8 for allergens, 20 for title_tag) do not
+    match the single d_model width the encoder needs anyway.
+    The id is an address into the embedding table, not a quantity: nothing
+    downstream may do arithmetic on it or compare two ids by size.
+
+    Ids run 1..N over the train values in alphabetical order, and UNKNOWN_ID (0)
+    covers a value that only appears in validation or test, so each embedding table
+    needs len(values) + 1 rows. Alphabetical rather than by frequency or file order
+    so an id depends only on which values train holds, not on how rows were shuffled.
+    """
+    columns = config_columns("categorical_columns")
+    categories = {
+        column: pd.Index(sorted(splits["train"][column].unique())) for column in columns
+    }
+
+    for split in splits.values():
+        for column in columns:
+            # get_indexer returns -1 for a value missing from the index, so +1 puts
+            # it on UNKNOWN_ID and every known value on 1..N, vectorised per column.
+            split[column] = categories[column].get_indexer(split[column]) + 1
+        # id -> value, so a report or a prediction can be read back as a category.
+        split.attrs["categorical_id_mapping"] = {
+            column: dict(enumerate(values, start=1))
+            for column, values in categories.items()
         }
-        df[column] = encoded.to_numpy().tolist()
+    return splits
 
-    # Maps each vector index to the category represented by that position.
-    df.attrs["one_hot_encoding_mapping"] = encoding_mapping
-    return df
+def categorical_cardinalities(split: pd.DataFrame) -> Dict[str, int]:
+    """How many rows each categorical column needs in its embedding table.
+
+    That is the number of train values plus one, because UNKNOWN_ID (0) sits below
+    them and a validation or test row is allowed to land on it.
+    """
+    mapping = split.attrs["categorical_id_mapping"]
+    return {column: len(values) + 1 for column, values in mapping.items()}
+
 
 def process_title_column(df: pd.DataFrame)-> pd.DataFrame:
     """ parse the title column, extracting into new columns: product name and title_tag.

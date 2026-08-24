@@ -17,13 +17,15 @@ def write_processed_data_report(
 		report_lines.append("=" * 100)
 		report_lines.append(f"{key.upper()} | rows={len(value):,} cols={value.shape[1]}")
 		if key == "train":
-			mapping = value.attrs.get("one_hot_encoding_mapping", {})
-			report_lines.append("One-hot encoding mapping (vector index -> category):")
+			mapping = value.attrs.get("categorical_id_mapping", {})
+			report_lines.append("Categorical id mapping (id -> value, 0 = unseen in train):")
 			if mapping:
 				for column, column_mapping in mapping.items():
-					report_lines.append(f"  {column}: {column_mapping}")
+					report_lines.append(f"  {column}:")
+					for identifier, category in column_mapping.items():
+						report_lines.append(f"    {identifier:>3} -> {category}")
 			else:
-				report_lines.append("  No one-hot encoded columns")
+				report_lines.append("  No categorical columns")
 		if "bought" in value.columns:
 			bought_ratio = value["bought"].astype(bool).mean()
 			report_lines.append(
