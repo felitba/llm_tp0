@@ -5,6 +5,7 @@ Changes made:
 2. shuffle once with seed so we get random query_id's from each bucket
 3. do the 80/10/10 train/val/test split for each stratum => bought rate stays even without cutting queries
 
+2012 
 
 **The problem is that there there aren't enough queries for bucket 4 (only 5!!)
 and when we do the TRAIN/VAL/TEST split, test ends up getting 0 queries for the test.

@@ -16,5 +16,6 @@
   "dim_feedforward": 2048,
   "one_hot_columns":["category", "storage_type", "brand", "country_of_origin", "allergens"],
   "drop_columns":["title","description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart"],
-  "normalize_columns":["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"]
+  "normalize_columns":["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"],
+  "pooling": "cls"
 }
