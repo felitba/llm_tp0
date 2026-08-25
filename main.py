@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,10 @@ def run_epoch(
 	criterion,
 	device: torch.device,
 	optimizer: torch.optim.Optimizer | None = None,
+	print_cls_btr: bool = False,
+	split_name: str = "",
+	cls_output_path: Path | None = None,
+	epoch: int | None = None,
 ) -> dict[str, float | np.ndarray]:
 	"""Run one train or evaluation epoch."""
 	is_train = optimizer is not None
@@ -65,6 +70,7 @@ def run_epoch(
 	total_loss = 0.0
 	all_logits = []
 	all_labels = []
+	cls_rows = []
 
 	for batch in loader:
 		numeric = batch["numeric"].to(device)
@@ -78,6 +84,32 @@ def run_epoch(
 		logits = model(numeric=numeric, categorical=categorical, title_ids=title_ids)
 		loss = criterion(logits, labels)
 
+		if print_cls_btr:
+			product_ids = next(
+				(batch[key] for key in ("product_id", "product_ids", "id") if key in batch),
+				range(len(labels)),
+			)
+			if torch.is_tensor(product_ids):
+				product_ids = product_ids.detach().cpu().tolist()
+			for product_id, cls_btr, label in zip(
+				product_ids,
+				logits.detach().cpu().reshape(-1).tolist(),
+				labels.detach().cpu().reshape(-1).tolist(),
+			):
+				probability = torch.sigmoid(torch.tensor(cls_btr)).item()
+				cls_rows.append({
+					"epoch": epoch,
+					"split": split_name,
+					"product_id": product_id,
+					"cls_btr": cls_btr,
+					"probability": probability,
+					"bought": int(label),
+				})
+				print(
+					f"[{split_name}] product={product_id} "
+					f"CLS_BTR={cls_btr:.6f} probability={probability:.6f} label={int(label)}"
+				)
+
 		if is_train:
 			loss.backward()
 			optimizer.step()
@@ -85,6 +117,15 @@ def run_epoch(
 		total_loss += loss.item() * labels.size(0)
 		all_logits.append(logits.detach().cpu())
 		all_labels.append(labels.detach().cpu())
+
+	if cls_output_path is not None and cls_rows:
+		cls_output_path.parent.mkdir(parents=True, exist_ok=True)
+		write_header = not cls_output_path.exists()
+		with cls_output_path.open("a", newline="", encoding="utf-8") as file:
+			writer = csv.DictWriter(file, fieldnames=cls_rows[0].keys())
+			if write_header:
+				writer.writeheader()
+			writer.writerows(cls_rows)
 
 	logits_np = torch.cat(all_logits).numpy().reshape(-1)
 	labels_np = torch.cat(all_labels).numpy().reshape(-1)
@@ -106,6 +147,7 @@ def train_one_experiment(
 	device: torch.device,
 	forced_epochs: int | None = None,
 	save_plots: bool = True,
+	print_cls_btr: bool = False,
 ) -> dict[str, float | str]:
 	"""Train one configured experiment and return its final metrics."""
 	set_seed(int(config.get("seed", config.get("split_seed", 42))))
@@ -123,10 +165,26 @@ def train_one_experiment(
 
 	history = {"train": [], "val": []}
 	epochs = forced_epochs if forced_epochs is not None else int(config.get("epochs", 6))
+	early_stopping_patience = int(config.get("early_stopping_patience", 3))
+	early_stopping_min_delta = float(config.get("early_stopping_min_delta", 0.0))
+	best_val_loss = float("inf")
+	best_model_state = None
+	epochs_without_improvement = 0
+	cls_output_path = PROJECT_ROOT / "output" / "experiments" / name / "cls_btr_comparison.csv"
+	if print_cls_btr and cls_output_path.exists():
+		cls_output_path.unlink()
 
 	for epoch in range(1, epochs + 1):
-		train_metrics = run_epoch(model, loaders.train, criterion, device, optimizer)
-		val_metrics = run_epoch(model, loaders.validation, criterion, device)
+		train_metrics = run_epoch(
+			model, loaders.train, criterion, device, optimizer,
+			print_cls_btr=print_cls_btr, split_name="train",
+			cls_output_path=cls_output_path if print_cls_btr else None, epoch=epoch,
+		)
+		val_metrics = run_epoch(
+			model, loaders.validation, criterion, device,
+			print_cls_btr=print_cls_btr, split_name="validation",
+			cls_output_path=cls_output_path if print_cls_btr else None, epoch=epoch,
+		)
 		history["train"].append(float(train_metrics["loss"]))
 		history["val"].append(float(val_metrics["loss"]))
 
@@ -136,7 +194,27 @@ def train_one_experiment(
 			f"val_roc_auc={val_metrics['roc_auc']:.4f} val_pr_auc={val_metrics['pr_auc']:.4f}"
 		)
 
-	test_metrics = run_epoch(model, loaders.test, criterion, device)
+		if float(val_metrics["loss"]) < best_val_loss - early_stopping_min_delta:
+			best_val_loss = float(val_metrics["loss"])
+			best_model_state = copy.deepcopy(model.state_dict())
+			epochs_without_improvement = 0
+		elif early_stopping_patience > 0:
+			epochs_without_improvement += 1
+			if epochs_without_improvement >= early_stopping_patience:
+				print(f"[{name}] Early stopping at epoch {epoch}.")
+				break
+
+	completed_epochs = len(history["val"])
+	if best_model_state is not None:
+		model.load_state_dict(best_model_state)
+
+	test_metrics = run_epoch(
+		model, loaders.test, criterion, device,
+		print_cls_btr=print_cls_btr, split_name="test",
+		cls_output_path=cls_output_path if print_cls_btr else None, epoch=completed_epochs,
+	)
+	if print_cls_btr:
+		print(f"CLS comparison written to: {cls_output_path}")
 	print(
 		f"[{name}] TEST | loss={test_metrics['loss']:.4f} "
 		f"roc_auc={test_metrics['roc_auc']:.4f} pr_auc={test_metrics['pr_auc']:.4f}"
@@ -147,7 +225,7 @@ def train_one_experiment(
 
 	return {
 		"name": name,
-		"epochs": epochs,
+		"epochs": completed_epochs,
 		"d_model": int(config.get("d_model")),
 		"n_heads": int(config.get("n_heads")),
 		"num_layers": int(config.get("num_layers")),
@@ -215,6 +293,11 @@ def parse_args() -> argparse.Namespace:
 		action="store_true",
 		help="Skip saving loss/PR/ROC plots.",
 	)
+	parser.add_argument(
+		"--print-cls-btr",
+		action="store_true",
+		help="Print each product's CLS BTR output, probability, and label.",
+	)
 	return parser.parse_args()
 
 
@@ -233,6 +316,7 @@ def main() -> None:
 				device=device,
 				forced_epochs=args.epochs,
 				save_plots=not args.no_plots,
+				print_cls_btr=args.print_cls_btr,
 			)
 		)
 

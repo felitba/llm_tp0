@@ -97,17 +97,67 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-Run the main training script from the project root:
+From the project root, activate your virtual environment and run the training entry point:
 
 ```bash
+# Windows (PowerShell)
+.\.venv\Scripts\Activate.ps1
+python main.py
+
+# Windows (CMD)
+.\.venv\Scripts\activate.bat
+python main.py
+
+# macOS / Linux
+source .venv/bin/activate
 python main.py
 ```
+
+If you are using the Python launcher on Windows, this is also valid:
+
+```bash
+py main.py
+```
+
+The script expects to be launched from the repository root so that relative paths such as `config/config.json` and `dataset/supermarket_products.csv` resolve correctly.
 
 Configuration is loaded from:
 
 ```text
 config/config.json
 ```
+
+Optional experiment and training controls are available via CLI arguments, for example:
+
+```bash
+python main.py --experiment base
+python main.py --epochs 1 --no-plots
+```
+
+## Running Experiments
+Experiment definitions are stored in `config/config.json` under the `experiments` array. Each experiment has a unique `name` and an `overrides` object for model or training settings.
+
+Run all configured experiments:
+
+```bash
+python main.py
+```
+
+Run one experiment by name:
+
+```bash
+python main.py --experiment small_d64_l2
+python main.py --experiment medium_d96_l2
+python main.py --experiment small_d64_l3
+```
+
+For a quick smoke test, override the epoch count and optionally skip plots:
+
+```bash
+python main.py --experiment small_d64_l2 --epochs 1 --no-plots
+```
+
+Training plots are saved under `output/experiments/<experiment_name>/`, and metrics for all selected experiments are written to `output/experiments/summary.csv`.
 
 ## Collaboration
 This project is intended to be developed collaboratively. Please fill in the placeholders below as the team evolves.

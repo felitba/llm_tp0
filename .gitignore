@@ -11,3 +11,4 @@ graph/
 comentarios_para_el_equipo/ANALISIS_COLUMNAS.md
 baseline/
 dataset/test_preprocessing.py
+output/experiments/
