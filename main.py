@@ -105,10 +105,6 @@ def run_epoch(
 					"probability": probability,
 					"bought": int(label),
 				})
-				print(
-					f"[{split_name}] product={product_id} "
-					f"CLS_BTR={cls_btr:.6f} probability={probability:.6f} label={int(label)}"
-				)
 
 		if is_train:
 			loss.backward()

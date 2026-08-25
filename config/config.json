@@ -13,6 +13,8 @@
   "dropout": 0.1,
   "batch_size": 64,
   "weight_decay": 0.01,
+  "early_stopping_patience": 10,
+  "early_stopping_min_delta": 0.0001,
   "activation": "relu",
   "encoding": "gpt2",
   "dim_feedforward": 2048,
@@ -25,33 +27,68 @@
   "max_title_len":10,
   "experiments": [
     {
-      "name": "small_d64_l2",
-      "overrides": {
-        "d_model": 64,
-        "n_heads": 4,
-        "num_layers": 2,
-        "dim_feedforward": 128,
-        "epochs": 500
-      }
-    },
-    {
-      "name": "medium_d96_l2",
+      "name": "medium_d96_l2_baseline",
       "overrides": {
         "d_model": 96,
         "n_heads": 4,
         "num_layers": 2,
         "dim_feedforward": 192,
-        "epochs": 500
+        "epochs": 500,
+        "learning_rate": 0.0003,
+        "dropout": 0.1,
+        "weight_decay": 0.01
       }
     },
     {
-      "name": "small_d64_l3",
+      "name": "medium_d128_l2",
       "overrides": {
-        "d_model": 64,
+        "d_model": 128,
+        "n_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 256,
+        "epochs": 500,
+        "learning_rate": 0.0003,
+        "dropout": 0.1,
+        "weight_decay": 0.01
+      }
+    },
+    {
+      "name": "medium_d96_l2_regularized",
+      "overrides": {
+        "d_model": 96,
+        "n_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 192,
+        "epochs": 500,
+        "learning_rate": 0.0002,
+        "dropout": 0.2,
+        "weight_decay": 0.03
+      }
+    },
+    {
+      "name": "medium_d128_l3",
+      "overrides": {
+        "d_model": 128,
         "n_heads": 4,
         "num_layers": 3,
-        "dim_feedforward": 128,
-        "epochs": 500
+        "dim_feedforward": 256,
+        "epochs": 500,
+        "learning_rate": 0.0002,
+        "dropout": 0.1,
+        "weight_decay": 0.01
+      }
+    },
+    {
+      "name": "medium_d96_l2_low_lr",
+      "overrides": {
+        "d_model": 96,
+        "n_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 384,
+        "epochs": 500,
+        "learning_rate": 0.0001,
+        "dropout": 0.1,
+        "weight_decay": 0.01
       }
     }
   ]
