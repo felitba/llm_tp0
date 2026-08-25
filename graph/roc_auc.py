@@ -1,16 +1,37 @@
-"""ROC curve, computed with scikit-learn."""
+"""ROC curve calculated over model-score thresholds."""
 
 from collections.abc import Sequence
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_auc_score, roc_curve
 
+from metrics.metrics import fall_out, recall
 from graph.threshold_curves import (
-	ThresholdCurve,
+	ConfusionCounts,
+	calculate_threshold_curve,
 	make_realistic_demo_samples,
 	plot_threshold_curve,
 )
+
+
+def _false_positive_rate_from_counts(counts: ConfusionCounts) -> float:
+	return fall_out(counts.true_negative, counts.false_positive)
+
+
+def _true_positive_rate_from_counts(counts: ConfusionCounts) -> float:
+	return recall(counts.true_positive, counts.false_negative)
+
+
+def roc_auc_score(y_true: Sequence[int], y_scores: Sequence[float]) -> float:
+	"""Return threshold-based ROC AUC without creating a plot."""
+	curve = calculate_threshold_curve(
+		y_true=y_true,
+		y_scores=y_scores,
+		x_metric=_false_positive_rate_from_counts,
+		y_metric=_true_positive_rate_from_counts,
+	)
+	return curve.auc
+
 
 def plot_roc_auc(
 	y_true: Sequence[int], y_scores: Sequence[float]
@@ -20,12 +41,11 @@ def plot_roc_auc(
 	``y_true`` contains binary labels and ``y_scores`` contains the score or
 	probability used for thresholding.
 	"""
-	false_positive_rate, true_positive_rate, thresholds = roc_curve(y_true, y_scores)
-	curve = ThresholdCurve(
-		thresholds=thresholds,
-		x_values=false_positive_rate,
-		y_values=true_positive_rate,
-		auc=float(roc_auc_score(y_true, y_scores)),
+	curve = calculate_threshold_curve(
+		y_true=y_true,
+		y_scores=y_scores,
+		x_metric=_false_positive_rate_from_counts,
+		y_metric=_true_positive_rate_from_counts,
 	)
 	return plot_threshold_curve(
 		curve=curve,

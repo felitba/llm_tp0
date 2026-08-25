@@ -3,59 +3,68 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from config.config import load_config
-from embedding import TokenEmbedding
-from encoding_block import EncodingBlock
+from model.encoding_block import EncodingBlock
+from model.feature_tokenizer import FeatureTokenizer
 
 
 class EncoderOnlyModel(nn.Module):
     """Encoder-only Transformer model for BTR prediction."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, cardinalities: dict[str, int], config: dict | None = None
+    ) -> None:
         super().__init__()
 
-        config = load_config()
-        self.embedding_dim = int(config.get("d_model"))
-        self.vocab_size = int(config.get("vocab_size"))
-        self.dropout = float(config.get("dropout"))
+        config_data = config or load_config()
+        self.embedding_dim = int(config_data.get("d_model"))
+        self.vocab_size = int(config_data.get("vocab_size"))
+        self.dropout = float(config_data.get("dropout"))
 
-        # Embedding layer
-        self.embedding = TokenEmbedding()
+        # Multimodal feature tokenizer
+        self.feature_tokenizer = FeatureTokenizer(cardinalities, config_data)
 
         # Encoder block
-        self.encoder_block = EncodingBlock()
+        self.encoder_block = EncodingBlock(config_data)
 
-        # TODO: lets define this together. 
-        # Classification head for BTR prediction
+        # Classification head for BTR prediction (returns logits)
         self.classification_head = nn.Sequential(
             nn.Linear(self.embedding_dim, self.embedding_dim // 2),
             nn.ReLU(),
             nn.Dropout(self.dropout),
             nn.Linear(self.embedding_dim // 2, 1),
-            nn.Sigmoid(),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        numeric: torch.Tensor,
+        categorical: torch.Tensor,
+        title_ids: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Forward pass through the model.
 
         Args:
-            x: Input tensor of shape (batch_size, seq_len) with token ids
+            numeric: Tensor of shape (batch_size, n_numeric)
+            categorical: Tensor of shape (batch_size, n_categorical)
+            title_ids: Tensor of shape (batch_size, max_title_len)
 
         Returns:
-            Output predictions of shape (batch_size, 1) for BTR
+            Logits of shape (batch_size, 1) for BTR
         """
-        # Embedding
-        embedded = self.embedding(x)  # (batch_size, seq_len, d_model)
+        # Multimodal tokenization
+        tokens, padding_mask = self.feature_tokenizer(
+            numeric=numeric,
+            categorical=categorical,
+            title_ids=title_ids,
+        )
 
-        # Encoder
-        encoded = self.encoder_block(embedded)  # (batch_size, seq_len, d_model)
+        # Encoder with key padding mask
+        encoded = self.encoder_block(tokens, src_key_padding_mask=padding_mask)
 
-        # TODO: lets define this together. 
-        # Global average pooling
-        pooled = encoded.mean(dim=1)  # (batch_size, d_model)
+        # CLS representation
+        cls_representation = encoded[:, 0, :]  # (batch_size, d_model)
 
-        # TODO: lets define this together. 
         # Classification head
-        output = self.classification_head(pooled)  # (batch_size, 1)
+        output = self.classification_head(cls_representation)  # (batch_size, 1)
 
         return output

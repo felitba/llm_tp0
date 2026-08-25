@@ -11,13 +11,48 @@
   "test_split": 0.1,
   "split_seed": 42,
   "dropout": 0.1,
+  "batch_size": 64,
+  "weight_decay": 0.01,
   "activation": "relu",
   "encoding": "gpt2",
   "dim_feedforward": 2048,
+  "seed": 42,
   "drop_columns":["title","description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart"],
   "normalize_columns":["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"],
   "categorical_columns":["category", "allergens", "title_tag", "brand", "storage_type"],
   "numeric_columns":["price", "nutrition_score"],
   "text_column":"product_name",
-  "max_title_len":10
+  "max_title_len":10,
+  "experiments": [
+    {
+      "name": "small_d64_l2",
+      "overrides": {
+        "d_model": 64,
+        "n_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 128,
+        "epochs": 5
+      }
+    },
+    {
+      "name": "medium_d96_l2",
+      "overrides": {
+        "d_model": 96,
+        "n_heads": 4,
+        "num_layers": 2,
+        "dim_feedforward": 192,
+        "epochs": 5
+      }
+    },
+    {
+      "name": "small_d64_l3",
+      "overrides": {
+        "d_model": 64,
+        "n_heads": 4,
+        "num_layers": 3,
+        "dim_feedforward": 128,
+        "epochs": 5
+      }
+    }
+  ]
 }

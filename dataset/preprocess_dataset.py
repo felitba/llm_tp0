@@ -16,21 +16,22 @@ NO_TAG = "No tag"
 UNKNOWN_ID = 0
 
 
-def config_columns(key: str) -> list[str]:
+def config_columns(key: str, config: dict | None = None) -> list[str]:
     """Read a column list from config.json, accepting a comma-separated string too."""
-    columns = load_config().get(key, [])
+    columns = (config or load_config()).get(key, [])
     if isinstance(columns, str):
         columns = [column.strip() for column in columns.split(",") if column.strip()]
     return list(columns)
 
-def get_raw_dataset() -> pd.DataFrame:
+def get_raw_dataset(config: dict | None = None) -> pd.DataFrame:
     """Load the supermarket products dataset.
 
     keep_default_na=False because "None" is a real allergens category (a product
     with no allergens), and pandas' default na_values would read it as NaN.
     """
+    config_data = config or load_config()
     return pd.read_csv(
-        resolve_path(load_config().get("dataset_path")), keep_default_na=False
+        resolve_path(config_data.get("dataset_path")), keep_default_na=False
     )
 
 # helper function for split dataset.
@@ -64,21 +65,21 @@ def separate(df: pd.DataFrame, ratios: tuple[float, float, float], seed: int) ->
     split_index = np.searchsorted(cutoffs, position, side="right")
     return pd.Series(np.array(SPLIT_NAMES)[split_index], index=queries["query_id"])
 
-def split_dataset(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+def split_dataset(df: pd.DataFrame, config: dict | None = None) -> Dict[str, pd.DataFrame]:
     """Split the dataset into train/validation/test using ratios from config.json."""
-    config = load_config()
+    config_data = config or load_config()
 
     ratios = (
-        float(config.get("train_split")),
-        float(config.get("validation_split")),
-        float(config.get("test_split")),
+        float(config_data.get("train_split")),
+        float(config_data.get("validation_split")),
+        float(config_data.get("test_split")),
     )
-    split_of_query = separate(df, ratios, int(config.get("split_seed", 42)))
+    split_of_query = separate(df, ratios, int(config_data.get("split_seed", 42)))
     split_of_row = df["query_id"].map(split_of_query)
 
     return {name: df[split_of_row == name].copy() for name in SPLIT_NAMES}
 
-def get_data_processed() -> Dict[str, pd.DataFrame]:
+def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     """Load data and return train/validation/test splits according to config.json.
 
     CHANGED (2026-08-24): the encoders used to run on the whole dataframe and the
@@ -87,13 +88,16 @@ def get_data_processed() -> Dict[str, pd.DataFrame]:
     To go back to the old order, move the encode calls above split_dataset and
     have them take/return a single dataframe again (git history has that version).
     """
-    df = get_raw_dataset()
+    config_data = config or load_config()
+    df = get_raw_dataset(config_data)
     #TODO: define whether this is necessary or not.
     df = process_title_column(df)
-    df = drop_columns(df)
+    df = drop_columns(df, config_data)
 
-    splits = split_dataset(df)
-    splits = encode_categorical_ids(splits)
+    splits = split_dataset(df, config_data)
+    splits = encode_categorical_ids(splits, config_data)
+    for split in splits.values():
+        split.attrs["text_column"] = config_data.get("text_column", "product_name")
 
     # DECISION (2026-08-24): price and nutrition_score stay on their raw scale for
     # now, so the first FT-Transformer run shows what the numeric tokens do without
@@ -105,18 +109,18 @@ def get_data_processed() -> Dict[str, pd.DataFrame]:
     # version and would leak; rewrite it to take the splits before calling it.
     return splits
 
-def drop_columns(df: pd.DataFrame) -> pd.DataFrame:
+def drop_columns(df: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
     """Drop the columns specified in config.json."""
-    return df.drop(columns=config_columns("drop_columns"), errors="ignore")
+    return df.drop(columns=config_columns("drop_columns", config), errors="ignore")
 
-def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_data(df: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
     """Normalize the dataset using min-max normalization.
 
     UNUSED (2026-08-24): kept for reference only. min()/max() over whatever frame
     it is handed means calling it before the split fits the scale on validation and
     test rows too. See the note in get_data_processed before wiring it back in.
     """
-    columns = config_columns("normalize_columns")
+    columns = config_columns("normalize_columns", config)
 
     if columns:
         df[columns] = (df[columns] - df[columns].min()) / (
@@ -124,7 +128,9 @@ def normalize_data(df: pd.DataFrame) -> pd.DataFrame:
         )
     return df
 
-def encode_categorical_ids(splits: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+def encode_categorical_ids(
+    splits: Dict[str, pd.DataFrame], config: dict | None = None
+) -> Dict[str, pd.DataFrame]:
     """Replace each configured categorical column with the integer id nn.Embedding wants.
 
     CHANGED (2026-08-24): this replaces the one-hot encoding the pipeline used to
@@ -140,7 +146,7 @@ def encode_categorical_ids(splits: Dict[str, pd.DataFrame]) -> Dict[str, pd.Data
     needs len(values) + 1 rows. Alphabetical rather than by frequency or file order
     so an id depends only on which values train holds, not on how rows were shuffled.
     """
-    columns = config_columns("categorical_columns")
+    columns = config_columns("categorical_columns", config)
     categories = {
         column: pd.Index(sorted(splits["train"][column].unique())) for column in columns
     }

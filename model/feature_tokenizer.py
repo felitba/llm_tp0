@@ -173,14 +173,16 @@ class FeatureTokenizer(nn.Module):
             dataset.preprocess_dataset.categorical_cardinalities.
     """
 
-    def __init__(self, cardinalities: Mapping[str, int]) -> None:
+    def __init__(
+        self, cardinalities: Mapping[str, int], config: dict | None = None
+    ) -> None:
         super().__init__()
-        config = load_config()
+        config_data = config or load_config()
 
-        self.d_model = int(config.get("d_model"))
-        self.categorical_columns = list(config.get("categorical_columns", []))
-        self.numeric_columns = list(config.get("numeric_columns", []))
-        self.max_title_len = int(config.get("max_title_len"))
+        self.d_model = int(config_data.get("d_model"))
+        self.categorical_columns = list(config_data.get("categorical_columns", []))
+        self.numeric_columns = list(config_data.get("numeric_columns", []))
+        self.max_title_len = int(config_data.get("max_title_len"))
 
         missing = [c for c in self.categorical_columns if c not in cardinalities]
         if missing:
@@ -192,7 +194,7 @@ class FeatureTokenizer(nn.Module):
             uniform_init(torch.empty(1, 1, self.d_model), self.d_model)
         )
         self.text_tokenizer = TextTokenizer(
-            vocab_size=int(config.get("vocab_size")),
+            vocab_size=int(config_data.get("vocab_size")),
             d_model=self.d_model,
             max_len=self.max_title_len,
         )

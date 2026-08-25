@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 
-def plot_training_progress(losses):
+def plot_training_progress(losses, show: bool = False):
     """
     Plots the training and validation losses over epochs.
 
@@ -16,18 +16,21 @@ def plot_training_progress(losses):
 
     epochs = len(train_losses)
 
-    plt.figure(figsize=(10, 5))
-    plt.plot(range(1, epochs + 1), train_losses, label='Training Loss', marker='o')
+    figure, axes = plt.subplots(figsize=(10, 5))
+    axes.plot(range(1, epochs + 1), train_losses, label='Training Loss', marker='o')
     if val_losses:
-        plt.plot(
+        axes.plot(
             range(1, len(val_losses) + 1),
             val_losses,
             label='Validation Loss',
             marker='o'
         )
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss Over Epochs')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+    axes.set_xlabel('Epochs')
+    axes.set_ylabel('Loss')
+    axes.set_title('Training and Validation Loss Over Epochs')
+    axes.legend()
+    axes.grid(True)
+    figure.tight_layout()
+    if show:
+        plt.show()
+    return figure, axes
