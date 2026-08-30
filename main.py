@@ -239,6 +239,11 @@ def train_one_experiment(
 				break
 
 	completed_epochs = len(history["val"])
+	best_epoch = (
+		min(range(len(history["val"])), key=history["val"].__getitem__) + 1
+		if history["val"]
+		else None
+	)
 	if best_model_state is not None:
 		model.load_state_dict(best_model_state)
 
@@ -262,9 +267,6 @@ def train_one_experiment(
 		"num_layers": int(config.get("num_layers")),
 		"learning_rate": float(config.get("learning_rate")),
 		"batch_size": int(config.get("batch_size", 64)),
-		"early_stopping_metric": early_stopping_metric,
-		"best_epoch": best_epoch,
-		"best_validation_metric": float(best_metric),
 		# How the row reached the encoder, so two rows of this file can be told
 		# apart when the ablation is representation rather than architecture.
 		"n_text_cols": len(splits["train"].attrs.get("text_columns", [])),
@@ -281,12 +283,6 @@ def train_one_experiment(
 		config=config,
 		history=history,
 		epoch_metrics=epoch_metrics,
-		selection={
-			"metric": early_stopping_metric,
-			"direction": metric_direction,
-			"best_epoch": best_epoch,
-			"best_value": float(best_metric),
-		},
 		test={
 			"loss": float(test_metrics["loss"]),
 			"roc_auc": float(test_metrics["roc_auc"]),
