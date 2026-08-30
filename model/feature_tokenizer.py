@@ -114,6 +114,7 @@ class CategoricalTokenizer(nn.Module):
 
     def __init__(self, cardinalities: Mapping[str, int], d_model: int) -> None:
         super().__init__()
+        self.d_model = d_model
         self.columns = list(cardinalities)
         self.embeddings = nn.ModuleDict(
             {column: nn.Embedding(rows, d_model) for column, rows in cardinalities.items()}
@@ -123,6 +124,10 @@ class CategoricalTokenizer(nn.Module):
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         """(batch, n_columns) ids -> (batch, n_columns, d_model)."""
+        # An all-text ablation configures no categorical columns at all, and
+        # torch.stack has no empty case; cat wants the (batch, 0, d_model) slice.
+        if not self.columns:
+            return ids.new_zeros((ids.shape[0], 0, self.d_model), dtype=torch.float32)
         tokens = [
             self.embeddings[column](ids[:, position])
             for position, column in enumerate(self.columns)

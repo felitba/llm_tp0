@@ -14,8 +14,8 @@ import torch.nn as nn
 from config.config import PROJECT_ROOT, load_config
 from dataset.preprocess_dataset import categorical_cardinalities, get_data_processed
 from dataset.product_dataset import ProductDataLoaders, create_data_loaders
-from graph.pr_auc import plot_pr_auc, pr_auc_score
-from graph.roc_auc import plot_roc_auc, roc_auc_score
+from graph.pr_auc import plot_pr_auc, plot_pr_auc_by_config, pr_auc_score
+from graph.roc_auc import plot_roc_auc, plot_roc_auc_by_config, roc_auc_score
 from graph.train_vs_val_error import plot_training_progress
 from model.encoder_only_model import EncoderOnlyModel
 
@@ -144,8 +144,8 @@ def train_one_experiment(
 	forced_epochs: int | None = None,
 	save_plots: bool = True,
 	print_cls_btr: bool = False,
-) -> dict[str, float | str]:
-	"""Train one configured experiment and return its final metrics."""
+) -> tuple[dict[str, float | str], dict[str, float | np.ndarray]]:
+	"""Train one configured experiment and return its summary row and test metrics."""
 	set_seed(int(config.get("seed", config.get("split_seed", 42))))
 	splits = get_data_processed(config)
 	loaders: ProductDataLoaders = create_data_loaders(splits, config)
@@ -219,7 +219,7 @@ def train_one_experiment(
 	if save_plots:
 		save_experiment_plots(name, history, test_metrics)
 
-	return {
+	summary_row = {
 		"name": name,
 		"epochs": completed_epochs,
 		"d_model": int(config.get("d_model")),
@@ -227,10 +227,17 @@ def train_one_experiment(
 		"num_layers": int(config.get("num_layers")),
 		"learning_rate": float(config.get("learning_rate")),
 		"batch_size": int(config.get("batch_size", 64)),
+		# How the row reached the encoder, so two rows of this file can be told
+		# apart when the ablation is representation rather than architecture.
+		"n_text_cols": len(splits["train"].attrs.get("text_columns", [])),
+		"max_title_len": int(config.get("max_title_len")),
+		"n_numeric_cols": len(config.get("numeric_columns", [])),
+		"n_categorical_cols": len(config.get("categorical_columns", [])),
 		"test_loss": float(test_metrics["loss"]),
 		"test_roc_auc": float(test_metrics["roc_auc"]),
 		"test_pr_auc": float(test_metrics["pr_auc"]),
 	}
+	return summary_row, test_metrics
 
 
 def save_experiment_plots(
@@ -258,6 +265,37 @@ def save_experiment_plots(
 	plt.close(figure)
 
 
+def save_combined_curve_plots(
+	test_metrics_by_name: list[tuple[str, dict[str, float | np.ndarray]]],
+) -> list[Path]:
+	"""Save ROC and PR figures holding every config's test curve, colored per config."""
+	curves_input = []
+	for name, test_metrics in test_metrics_by_name:
+		labels = np.asarray(test_metrics["labels"], dtype=int)
+		probs = np.asarray(test_metrics["probs"], dtype=float)
+		if len(np.unique(labels)) < 2:
+			continue
+		curves_input.append((name, labels, probs))
+
+	if not curves_input:
+		return []
+
+	output_dir = PROJECT_ROOT / "output" / "experiments"
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	output_paths = []
+	for plot_curves, filename in (
+		(plot_roc_auc_by_config, "roc_auc_all_configs.jpg"),
+		(plot_pr_auc_by_config, "pr_auc_all_configs.jpg"),
+	):
+		output_path = output_dir / filename
+		figure, _ = plot_curves(curves_input)
+		figure.savefig(output_path, dpi=300, bbox_inches="tight")
+		plt.close(figure)
+		output_paths.append(output_path)
+	return output_paths
+
+
 def write_experiment_summary(rows: list[dict[str, float | str]]) -> Path:
 	"""Write experiment metrics to output/experiments/summary.csv."""
 	output_dir = PROJECT_ROOT / "output" / "experiments"
@@ -273,6 +311,11 @@ def write_experiment_summary(rows: list[dict[str, float | str]]) -> Path:
 
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Train BTR Transformer experiments.")
+	parser.add_argument(
+		"--config",
+		help="Config file to read, relative to the repo root. Defaults to config/config.json.",
+		default=None,
+	)
 	parser.add_argument(
 		"--experiment",
 		help="Run only one experiment name from config.json.",
@@ -299,25 +342,30 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
 	args = parse_args()
-	base_config = load_config()
+	base_config = load_config(args.config) if args.config else load_config()
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	print(f"Using device: {device}")
 
 	results = []
+	test_metrics_by_name = []
 	for name, config in experiment_configs(base_config, args.experiment):
-		results.append(
-			train_one_experiment(
-				name=name,
-				config=config,
-				device=device,
-				forced_epochs=args.epochs,
-				save_plots=not args.no_plots,
-				print_cls_btr=args.print_cls_btr,
-			)
+		summary_row, test_metrics = train_one_experiment(
+			name=name,
+			config=config,
+			device=device,
+			forced_epochs=args.epochs,
+			save_plots=not args.no_plots,
+			print_cls_btr=args.print_cls_btr,
 		)
+		results.append(summary_row)
+		test_metrics_by_name.append((name, test_metrics))
 
 	summary_path = write_experiment_summary(results)
 	print(f"Experiment summary written to: {summary_path}")
+
+	if not args.no_plots:
+		for combined_path in save_combined_curve_plots(test_metrics_by_name):
+			print(f"Combined plot written to: {combined_path}")
 
 
 if __name__ == "__main__":

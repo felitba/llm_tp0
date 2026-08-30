@@ -14,6 +14,15 @@ MAX_BOUGHT_STRATUM = 3
 NO_TAG = "No tag"
 # Id reserved for a category value that never appears in train. Real values start at 1.
 UNKNOWN_ID = 0
+# Column the serialized row text lands in when text_column names more than one column.
+SERIALIZED_TEXT_COLUMN = "serialized_row"
+# Kept out of the serialized text under "all": the label itself, and the query id,
+# which identifies a search rather than describing the product.
+DEFAULT_TEXT_EXCLUDE = ("bought", "query_id")
+# Separators for the serialized text. The field name travels with its value so the
+# tokenizer sees "price: 8.30", not a bare 8.30 it cannot attribute to a column.
+FIELD_SEPARATOR = " | "
+NAME_VALUE_SEPARATOR = ": "
 
 
 def config_columns(key: str, config: dict | None = None) -> list[str]:
@@ -93,11 +102,18 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     #TODO: define whether this is necessary or not.
     df = process_title_column(df)
     df = drop_columns(df, config_data)
+    # Before the split so every row is serialized the same way, and before
+    # encode_categorical_ids so the text still holds the category names.
+    source_columns = text_columns(df, config_data)
+    df, text_column = build_text_column(df, source_columns)
 
     splits = split_dataset(df, config_data)
     splits = encode_categorical_ids(splits, config_data)
     for split in splits.values():
-        split.attrs["text_column"] = config_data.get("text_column", "product_name")
+        # text_column is the one to read; text_columns is what went into it, which
+        # is the same thing only when a single column feeds the tokenizer.
+        split.attrs["text_column"] = text_column
+        split.attrs["text_columns"] = source_columns
 
     # DECISION (2026-08-24): price and nutrition_score stay on their raw scale for
     # now, so the first FT-Transformer run shows what the numeric tokens do without
@@ -171,6 +187,60 @@ def categorical_cardinalities(split: pd.DataFrame) -> Dict[str, int]:
     """
     mapping = split.attrs["categorical_id_mapping"]
     return {column: len(values) + 1 for column, values in mapping.items()}
+
+
+def text_columns(df: pd.DataFrame, config: dict | None = None) -> list[str]:
+    """Which columns feed the text tokenizer.
+
+    config.json's text_column accepts three forms:
+        "product_name"            one column, the FT-Transformer setup
+        ["product_name", "brand"] those columns, serialized into one string
+        "all"                     every surviving column except DEFAULT_TEXT_EXCLUDE
+                                  (override with text_exclude_columns)
+
+    "all" reads df.columns, so it means "everything drop_columns left", and it must
+    be called after drop_columns for that to hold.
+    """
+    config_data = config or load_config()
+    setting = config_data.get("text_column", "product_name")
+
+    if isinstance(setting, str):
+        if setting.strip().casefold() != "all":
+            return [setting]
+        excluded = set(
+            config_columns("text_exclude_columns", config_data) or DEFAULT_TEXT_EXCLUDE
+        )
+        return [column for column in df.columns if column not in excluded]
+
+    columns = list(setting)
+    missing = [column for column in columns if column not in df.columns]
+    if missing:
+        raise KeyError(f"text_column names columns not in the dataset: {missing}")
+    return columns
+
+
+def build_text_column(df: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, str]:
+    """Render the given columns into one string per row.
+
+    Returns the frame and the name of the column the text tokenizer should read,
+    which is the column itself when only one takes part and SERIALIZED_TEXT_COLUMN
+    when several do.
+
+    Call this before encode_categorical_ids: afterwards a categorical column holds
+    its integer id, and serializing that would hand the tokenizer "category: 3"
+    instead of "category: Frozen".
+    """
+    if not columns:
+        raise ValueError("text_column resolved to no columns")
+    if len(columns) == 1:
+        return df, columns[0]
+
+    serialized = None
+    for column in columns:
+        field = column + NAME_VALUE_SEPARATOR + df[column].fillna("").astype(str).str.strip()
+        serialized = field if serialized is None else serialized + FIELD_SEPARATOR + field
+    df[SERIALIZED_TEXT_COLUMN] = serialized
+    return df, SERIALIZED_TEXT_COLUMN
 
 
 def process_title_column(df: pd.DataFrame)-> pd.DataFrame:

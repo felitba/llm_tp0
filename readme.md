@@ -159,6 +159,24 @@ python main.py --experiment small_d64_l2 --epochs 1 --no-plots
 
 Training plots are saved under `output/experiments/<experiment_name>/`, and metrics for all selected experiments are written to `output/experiments/summary.csv`.
 
+### Feature tokens vs. plain text
+
+`config/text_vs_feature_tokens.json` asks whether the encoder does better reading a row as feature tokens (one token per column, FT-Transformer style) or as a serialized `name: value | name: value` string handed to the text tokenizer alone. Architecture, optimizer and splits are identical across its three experiments, so only the representation differs:
+
+| experiment | how a row reaches the encoder |
+| --- | --- |
+| `feature_tokens` | control: `product_name` as text, plus 2 numeric and 5 categorical tokens |
+| `all_text_matched_columns` | the same 8 columns, serialized as text, no numeric or categorical tokens |
+| `all_text_every_column` | every column left after `drop_columns` (minus the label and `query_id`), serialized as text |
+
+```bash
+python main.py --config config/text_vs_feature_tokens.json
+```
+
+The combined `output/experiments/roc_auc_all_configs.jpg` then holds exactly those three curves. `all_text_every_column` also sees columns the control never does, so read it against `all_text_matched_columns` to tell "more columns" apart from "text instead of feature tokens".
+
+`text_column` in any config accepts a single column name, a list of column names, or `"all"` (everything `drop_columns` left, minus `text_exclude_columns`, which defaults to `bought` and `query_id`). Set `numeric_columns` and `categorical_columns` to `[]` to remove the tabular tokens entirely, and size `max_title_len` to the longest serialized row so nothing is truncated.
+
 ## Collaboration
 This project is intended to be developed collaboratively. Please fill in the placeholders below as the team evolves.
 

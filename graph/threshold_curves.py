@@ -113,6 +113,41 @@ def plot_threshold_curve(
 	return figure, axes, curve.auc
 
 
+def plot_combined_threshold_curves(
+	curves: Sequence[tuple[str, ThresholdCurve]],
+	x_label: str,
+	y_label: str,
+	title: str,
+	auc_label: str,
+	step: bool = False,
+	show_random_baseline: bool = False,
+) -> tuple[plt.Figure, plt.Axes]:
+	"""Plot several named curves on one axes, one color per name."""
+	figure, axes = plt.subplots()
+	colors = plt.get_cmap("tab10").colors
+
+	for index, (name, curve) in enumerate(curves):
+		color = colors[index % len(colors)]
+		label = f"{name} ({auc_label} = {curve.auc:.3f})"
+		if step:
+			axes.step(curve.x_values, curve.y_values, where="post", color=color, label=label)
+		else:
+			axes.plot(curve.x_values, curve.y_values, color=color, label=label)
+
+	if show_random_baseline:
+		axes.plot([0.0, 1.0], [0.0, 1.0], "--", color="gray", label="Random baseline")
+
+	axes.set_xlabel(x_label)
+	axes.set_ylabel(y_label)
+	axes.set_title(title)
+	axes.set_xlim(0.0, 1.0)
+	axes.set_ylim(0.0, 1.05)
+	axes.grid(True, alpha=0.3)
+	axes.legend(fontsize="small")
+	figure.tight_layout()
+	return figure, axes
+
+
 def _validate_binary_inputs(
 	y_true: Sequence[int], y_scores: Sequence[float]
 ) -> tuple[np.ndarray, np.ndarray]:
