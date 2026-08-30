@@ -1,12 +1,14 @@
 """ROC curve calculated over model-score thresholds."""
 
 from collections.abc import Sequence
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+from config.config import PROJECT_ROOT
+
 from metrics.metrics import fall_out, recall
-from graph.threshold_curves import (
+from plots.plot_theme import save
+from plots.threshold_curves import (
 	ConfusionCounts,
 	ThresholdCurve,
 	calculate_threshold_curve,
@@ -81,6 +83,7 @@ def plot_roc_auc_by_config(
 if __name__ == "__main__":
 	y_true, y_scores = make_realistic_demo_samples()
 	figure, axes, auc = plot_roc_auc(y_true, y_scores)
-	figure.savefig(Path(__file__).with_name("roc_auc.jpg"), dpi=300, bbox_inches="tight")
+	# save() closes the figure, so the demo writes the file instead of blocking
+	# on a window; open output/demo/roc_auc.jpg to look at it.
 	print(f"Realistic demo ROC AUC: {auc:.3f}")
-	plt.show()
+	print(f"Wrote: {save(figure, PROJECT_ROOT / 'output' / 'demo' / 'roc_auc.jpg')}")

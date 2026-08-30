@@ -5,6 +5,8 @@ from typing import Dict
 
 import pandas as pd
 
+from config.config import PROJECT_ROOT
+
 
 def write_processed_data_report(
 	splits: Dict[str, pd.DataFrame],
@@ -43,7 +45,7 @@ def write_processed_data_report(
 		report_lines.append("")
 
 	if output_path is None:
-		output_path = Path(__file__).parent / "output" / "preprocess_dataset_report.txt"
+		output_path = PROJECT_ROOT / "output" / "preprocess_dataset_report.txt"
 
 	output_path.parent.mkdir(parents=True, exist_ok=True)
 	output_path.write_text("\n".join(report_lines), encoding="utf-8")

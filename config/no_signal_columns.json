@@ -1,0 +1,65 @@
+{
+  "_comment": "Ablation: do the three columns the EDA calls signal-free (brand, storage_type, nutrition_score) earn their tokens? config.json trains on all three, while comentarios_para_el_equipo/ANALISIS_COLUMNAS.md argues each is indistinguishable from chance (brand chi2=14.6 with 14 dof, storage_type chi2=1.1, nutrition_score r=-0.019, all flat inside the high-intent tier too). Run with: python main.py --config config/no_signal_columns.json. Architecture, optimizer, splits and seed are identical across the five experiments, so the only thing that changes is which feature tokens the encoder is handed.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 500,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "dropout": 0.1,
+  "batch_size": 64,
+  "weight_decay": 0.01,
+  "early_stopping_patience": 100,
+  "early_stopping_min_delta": 0.0001,
+  "activation": "relu",
+  "encoding": "gpt2",
+  "seed": 42,
+  "drop_columns": ["title", "description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart"],
+  "normalize_columns": ["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"],
+  "categorical_columns": ["category", "allergens", "title_tag", "brand", "storage_type"],
+  "numeric_columns": ["price", "nutrition_score"],
+  "text_column": "product_name",
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "control_all_features",
+      "_comment": "The config.json feature set, repeated here so the four ablations below are read against a run of this exact file rather than against a number from another config. Sequence is [CLS] + 10 product_name subwords + 2 numeric + 5 categorical = 18 positions.",
+      "overrides": {}
+    },
+    {
+      "name": "drop_brand",
+      "_comment": "brand alone. Note the usual argument for dropping it -- 'brand is already the literal prefix of title' -- does NOT apply to this pipeline: process_title_column strips the brand prefix out of product_name, so the text tokens do not carry it. This run therefore removes the brand information entirely, not just a duplicate of it.",
+      "overrides": {
+        "categorical_columns": ["category", "allergens", "title_tag", "storage_type"]
+      }
+    },
+    {
+      "name": "drop_storage_type",
+      "_comment": "storage_type alone. The weakest column in the analysis (BTR spread 0.010, chi2=1.1), and nearly determined by category, which stays in.",
+      "overrides": {
+        "categorical_columns": ["category", "allergens", "title_tag", "brand"]
+      }
+    },
+    {
+      "name": "drop_nutrition_score",
+      "_comment": "nutrition_score alone. Also the only run that changes the numeric block, and it removes the column whose raw 0-99 scale makes its tokens roughly 100x longer than the categorical ones (see NumericTokenizer, and the unapplied normalization in get_data_processed).",
+      "overrides": {
+        "numeric_columns": ["price"]
+      }
+    },
+    {
+      "name": "drop_all_three",
+      "_comment": "All three at once, i.e. the feature set the EDA actually recommends: price as the one numeric, category/allergens/title_tag as the categoricals. 15 positions instead of 18. If this matches the control, config.json should be trimmed to it.",
+      "overrides": {
+        "categorical_columns": ["category", "allergens", "title_tag"],
+        "numeric_columns": ["price"]
+      }
+    }
+  ]
+}

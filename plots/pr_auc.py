@@ -1,12 +1,15 @@
 """Precision-recall curve calculated over model-score thresholds."""
 
 from collections.abc import Sequence
-from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
+
+from config.config import PROJECT_ROOT
 
 from metrics.metrics import precision, recall
-from graph.threshold_curves import (
+from plots.plot_theme import save
+from plots.threshold_curves import (
 	ConfusionCounts,
 	ThresholdCurve,
 	calculate_threshold_curve,
@@ -36,6 +39,12 @@ def pr_curve(y_true: Sequence[int], y_scores: Sequence[float]) -> ThresholdCurve
 	)
 
 
+def positive_rate(y_true: Sequence[int]) -> float:
+	"""The precision a coin flip gets, which is where a PR curve's floor sits."""
+	labels = np.asarray(y_true, dtype=float)
+	return float(labels.mean()) if labels.size else 0.0
+
+
 def pr_auc_score(y_true: Sequence[int], y_scores: Sequence[float]) -> float:
 	"""Return threshold-based PR AUC without creating a plot."""
 	return pr_curve(y_true, y_scores).auc
@@ -57,6 +66,7 @@ def plot_pr_auc(
 		title="Precision-Recall Curve",
 		auc_label="PR AUC",
 		step=True,
+		baseline_y=positive_rate(y_true),
 	)
 
 
@@ -77,12 +87,16 @@ def plot_pr_auc_by_config(
 		title="Precision-Recall Curve by Configuration",
 		auc_label="AUC",
 		step=True,
+		# Every config is scored on the same test split, so one chance line serves
+		# all of them.
+		baseline_y=positive_rate(results_by_config[0][1]) if results_by_config else None,
 	)
 
 
 if __name__ == "__main__":
 	y_true, y_scores = make_realistic_demo_samples()
 	figure, axes, auc = plot_pr_auc(y_true, y_scores)
-	figure.savefig(Path(__file__).with_name("pr_auc.jpg"), dpi=300, bbox_inches="tight")
+	# save() closes the figure, so the demo writes the file instead of blocking
+	# on a window; open output/demo/pr_auc.jpg to look at it.
 	print(f"Realistic demo PR AUC: {auc:.3f}")
-	plt.show()
+	print(f"Wrote: {save(figure, PROJECT_ROOT / 'output' / 'demo' / 'pr_auc.jpg')}")

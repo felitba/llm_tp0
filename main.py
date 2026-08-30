@@ -6,7 +6,6 @@ import csv
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,9 +13,11 @@ import torch.nn as nn
 from config.config import PROJECT_ROOT, load_config
 from dataset.preprocess_dataset import categorical_cardinalities, get_data_processed
 from dataset.product_dataset import ProductDataLoaders, create_data_loaders
-from graph.pr_auc import plot_pr_auc, plot_pr_auc_by_config, pr_auc_score
-from graph.roc_auc import plot_roc_auc, plot_roc_auc_by_config, roc_auc_score
-from graph.train_vs_val_error import plot_training_progress
+from plots.experiment_plots import plot_run, plot_runs_combined
+from plots.pr_auc import pr_auc_score
+from plots.roc_auc import roc_auc_score
+from metrics.run_results import EXPERIMENTS_DIR, RunResults, save_run
+from model.checkpoint import save_checkpoint
 from model.encoder_only_model import EncoderOnlyModel
 
 
@@ -144,8 +145,10 @@ def train_one_experiment(
 	forced_epochs: int | None = None,
 	save_plots: bool = True,
 	print_cls_btr: bool = False,
-) -> tuple[dict[str, float | str], dict[str, float | np.ndarray]]:
-	"""Train one configured experiment and return its summary row and test metrics."""
+	config_file: str | None = None,
+	save_weights: bool = False,
+) -> RunResults:
+	"""Train one configured experiment and return everything it produced."""
 	set_seed(int(config.get("seed", config.get("split_seed", 42))))
 	splits = get_data_processed(config)
 	loaders: ProductDataLoaders = create_data_loaders(splits, config)
@@ -160,6 +163,9 @@ def train_one_experiment(
 	)
 
 	history = {"train": [], "val": []}
+	# Loss drives early stopping, but the AUCs are what the report compares, so
+	# keep them per epoch too: they are free here and unrecoverable later.
+	epoch_metrics: list[dict[str, float]] = []
 	epochs = forced_epochs if forced_epochs is not None else int(config.get("epochs", 6))
 	early_stopping_patience = int(config.get("early_stopping_patience", 3))
 	early_stopping_min_delta = float(config.get("early_stopping_min_delta", 0.0))
@@ -183,6 +189,15 @@ def train_one_experiment(
 		)
 		history["train"].append(float(train_metrics["loss"]))
 		history["val"].append(float(val_metrics["loss"]))
+		epoch_metrics.append({
+			"epoch": epoch,
+			"train_loss": float(train_metrics["loss"]),
+			"train_roc_auc": float(train_metrics["roc_auc"]),
+			"train_pr_auc": float(train_metrics["pr_auc"]),
+			"val_loss": float(val_metrics["loss"]),
+			"val_roc_auc": float(val_metrics["roc_auc"]),
+			"val_pr_auc": float(val_metrics["pr_auc"]),
+		})
 
 		print(
 			f"[{name}] Epoch {epoch:02d}/{epochs} | "
@@ -201,6 +216,11 @@ def train_one_experiment(
 				break
 
 	completed_epochs = len(history["val"])
+	best_epoch = (
+		min(range(len(history["val"])), key=history["val"].__getitem__) + 1
+		if history["val"]
+		else None
+	)
 	if best_model_state is not None:
 		model.load_state_dict(best_model_state)
 
@@ -215,9 +235,6 @@ def train_one_experiment(
 		f"[{name}] TEST | loss={test_metrics['loss']:.4f} "
 		f"roc_auc={test_metrics['roc_auc']:.4f} pr_auc={test_metrics['pr_auc']:.4f}"
 	)
-
-	if save_plots:
-		save_experiment_plots(name, history, test_metrics)
 
 	summary_row = {
 		"name": name,
@@ -237,70 +254,46 @@ def train_one_experiment(
 		"test_roc_auc": float(test_metrics["roc_auc"]),
 		"test_pr_auc": float(test_metrics["pr_auc"]),
 	}
-	return summary_row, test_metrics
 
-
-def save_experiment_plots(
-	name: str, history: dict[str, list[float]], test_metrics: dict[str, float | np.ndarray]
-) -> None:
-	"""Save loss, PR, and ROC plots for one experiment."""
-	output_dir = PROJECT_ROOT / "output" / "experiments" / name
-	output_dir.mkdir(parents=True, exist_ok=True)
-
-	figure, _ = plot_training_progress(history)
-	figure.savefig(output_dir / "loss.jpg", dpi=300, bbox_inches="tight")
-	plt.close(figure)
-
-	labels = np.asarray(test_metrics["labels"], dtype=int)
-	probs = np.asarray(test_metrics["probs"], dtype=float)
-	if len(np.unique(labels)) < 2:
-		return
-
-	figure, _, _ = plot_pr_auc(labels, probs)
-	figure.savefig(output_dir / "pr_auc.jpg", dpi=300, bbox_inches="tight")
-	plt.close(figure)
-
-	figure, _, _ = plot_roc_auc(labels, probs)
-	figure.savefig(output_dir / "roc_auc.jpg", dpi=300, bbox_inches="tight")
-	plt.close(figure)
-
-
-def save_combined_curve_plots(
-	test_metrics_by_name: list[tuple[str, dict[str, float | np.ndarray]]],
-) -> list[Path]:
-	"""Save ROC and PR figures holding every config's test curve, colored per config."""
-	curves_input = []
-	for name, test_metrics in test_metrics_by_name:
-		labels = np.asarray(test_metrics["labels"], dtype=int)
-		probs = np.asarray(test_metrics["probs"], dtype=float)
-		if len(np.unique(labels)) < 2:
-			continue
-		curves_input.append((name, labels, probs))
-
-	if not curves_input:
-		return []
-
-	output_dir = PROJECT_ROOT / "output" / "experiments"
-	output_dir.mkdir(parents=True, exist_ok=True)
-
-	output_paths = []
-	for plot_curves, filename in (
-		(plot_roc_auc_by_config, "roc_auc_all_configs.jpg"),
-		(plot_pr_auc_by_config, "pr_auc_all_configs.jpg"),
-	):
-		output_path = output_dir / filename
-		figure, _ = plot_curves(curves_input)
-		figure.savefig(output_path, dpi=300, bbox_inches="tight")
-		plt.close(figure)
-		output_paths.append(output_path)
-	return output_paths
+	results = RunResults(
+		name=name,
+		config=config,
+		history=history,
+		epoch_metrics=epoch_metrics,
+		test={
+			"loss": float(test_metrics["loss"]),
+			"roc_auc": float(test_metrics["roc_auc"]),
+			"pr_auc": float(test_metrics["pr_auc"]),
+		},
+		summary=summary_row,
+		labels=np.asarray(test_metrics["labels"], dtype=int),
+		probs=np.asarray(test_metrics["probs"], dtype=float),
+		config_file=config_file,
+	)
+	# Save before plotting: the numbers are the expensive part, the figures are
+	# a pure function of them and replot.py can rebuild those at any time.
+	print(f"[{name}] Results written to: {save_run(results)}")
+	if save_weights:
+		# model already holds best_model_state: the weights the test row reports.
+		checkpoint_path = save_checkpoint(
+			name=name,
+			model=model,
+			cardinalities=cardinalities,
+			config=config,
+			categorical_id_mapping=splits["train"].attrs.get("categorical_id_mapping", {}),
+			best_epoch=best_epoch,
+			test=results.test,
+		)
+		print(f"[{name}] Weights written to: {checkpoint_path}")
+	if save_plots:
+		plot_run(results)
+	return results
 
 
 def write_experiment_summary(rows: list[dict[str, float | str]]) -> Path:
 	"""Write experiment metrics to output/experiments/summary.csv."""
-	output_dir = PROJECT_ROOT / "output" / "experiments"
-	output_dir.mkdir(parents=True, exist_ok=True)
-	output_path = output_dir / "summary.csv"
+	EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
+	output_path = EXPERIMENTS_DIR / "summary.csv"
 	headers = list(rows[0])
 	with output_path.open("w", encoding="utf-8") as file:
 		file.write(",".join(headers) + "\n")
@@ -333,6 +326,11 @@ def parse_args() -> argparse.Namespace:
 		help="Skip saving loss/PR/ROC plots.",
 	)
 	parser.add_argument(
+		"--save-weights",
+		action="store_true",
+		help="Also write output/experiments/<name>/model.pt (~20 MB per experiment).",
+	)
+	parser.add_argument(
 		"--print-cls-btr",
 		action="store_true",
 		help="Print each product's CLS BTR output, probability, and label.",
@@ -346,25 +344,26 @@ def main() -> None:
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	print(f"Using device: {device}")
 
-	results = []
-	test_metrics_by_name = []
+	runs = []
 	for name, config in experiment_configs(base_config, args.experiment):
-		summary_row, test_metrics = train_one_experiment(
-			name=name,
-			config=config,
-			device=device,
-			forced_epochs=args.epochs,
-			save_plots=not args.no_plots,
-			print_cls_btr=args.print_cls_btr,
+		runs.append(
+			train_one_experiment(
+				name=name,
+				config=config,
+				device=device,
+				forced_epochs=args.epochs,
+				save_plots=not args.no_plots,
+				print_cls_btr=args.print_cls_btr,
+				config_file=args.config,
+				save_weights=args.save_weights,
+			)
 		)
-		results.append(summary_row)
-		test_metrics_by_name.append((name, test_metrics))
 
-	summary_path = write_experiment_summary(results)
+	summary_path = write_experiment_summary([run.summary for run in runs])
 	print(f"Experiment summary written to: {summary_path}")
 
 	if not args.no_plots:
-		for combined_path in save_combined_curve_plots(test_metrics_by_name):
+		for combined_path in plot_runs_combined(runs):
 			print(f"Combined plot written to: {combined_path}")
 
 

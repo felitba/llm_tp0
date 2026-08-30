@@ -1,6 +1,9 @@
 import csv
 import re
 from collections import defaultdict
+from pathlib import Path
+
+DATASET = Path(__file__).resolve().parent.parent / "dataset" / "supermarket_products.csv"
 
 
 def count_bought_by_title_tag(csv_filepath):
@@ -52,5 +55,4 @@ def count_bought_by_title_tag(csv_filepath):
 
 
 if __name__ == '__main__':
-    # Example usage
-    count_bought_by_title_tag('supermarket_products.csv')
+    count_bought_by_title_tag(DATASET)

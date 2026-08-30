@@ -6,6 +6,16 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plots.plot_theme import (
+	ACCENT,
+	BASELINE,
+	DASH,
+	apply_theme,
+	legend_top_left,
+	series_colors,
+	set_title,
+)
+
 
 @dataclass(frozen=True)
 class ConfusionCounts:
@@ -82,33 +92,28 @@ def plot_threshold_curve(
 	auc_label: str,
 	step: bool = False,
 	show_random_baseline: bool = False,
+	baseline_y: float | None = None,
 ) -> tuple[plt.Figure, plt.Axes, float]:
-	"""Plot a calculated threshold curve and return its figure, axes, and AUC."""
-	figure, axes = plt.subplots()
-	if step:
-		axes.step(
-			curve.x_values,
-			curve.y_values,
-			where="post",
-			label=f"{auc_label} = {curve.auc:.3f}",
-		)
-	else:
-		axes.plot(curve.x_values, curve.y_values, label=f"{auc_label} = {curve.auc:.3f}")
-	# One marker per point was readable on the old 101-point grid. A real curve
-	# has one point per distinct score, so markers would bury the line.
-	if len(curve.x_values) <= 100:
-		axes.plot(curve.x_values, curve.y_values, "o", markersize=3)
+	"""Plot a calculated threshold curve and return its figure, axes, and AUC.
 
-	if show_random_baseline:
-		axes.plot([0.0, 1.0], [0.0, 1.0], "--", color="gray", label="Random baseline")
+	``show_random_baseline`` draws the ROC diagonal; ``baseline_y`` draws the
+	no-skill line of a PR curve, which sits at the positive rate rather than at
+	zero. Both go in the legend along with the AUC, which is where a reader of
+	this kind of figure looks for them.
+	"""
+	apply_theme()
+	figure, axes = _unit_square_figure(5.0)
 
-	axes.set_xlabel(x_label)
-	axes.set_ylabel(y_label)
-	axes.set_title(title)
-	axes.set_xlim(0.0, 1.0)
-	axes.set_ylim(0.0, 1.05)
-	axes.grid(True, alpha=0.3)
-	axes.legend()
+	draw = axes.step if step else axes.plot
+	draw(
+		curve.x_values, curve.y_values,
+		**({"where": "post"} if step else {}),
+		color=ACCENT, label=f"{auc_label} = {curve.auc:.3f}",
+	)
+	_draw_baseline(axes, show_random_baseline, baseline_y)
+
+	_style_curve_axes(axes, x_label, y_label, title)
+	legend_top_left(axes)
 	figure.tight_layout()
 	return figure, axes, curve.auc
 
@@ -121,31 +126,70 @@ def plot_combined_threshold_curves(
 	auc_label: str,
 	step: bool = False,
 	show_random_baseline: bool = False,
+	baseline_y: float | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
 	"""Plot several named curves on one axes, one color per name."""
-	figure, axes = plt.subplots()
-	colors = plt.get_cmap("tab10").colors
+	apply_theme()
+	figure, axes = _unit_square_figure(5.6)
+	colors = series_colors(len(curves))
 
 	for index, (name, curve) in enumerate(curves):
-		color = colors[index % len(colors)]
-		label = f"{name} ({auc_label} = {curve.auc:.3f})"
-		if step:
-			axes.step(curve.x_values, curve.y_values, where="post", color=color, label=label)
-		else:
-			axes.plot(curve.x_values, curve.y_values, color=color, label=label)
+		draw = axes.step if step else axes.plot
+		draw(
+			curve.x_values, curve.y_values,
+			**({"where": "post"} if step else {}),
+			color=colors[index], label=f"{name} ({auc_label} = {curve.auc:.3f})",
+		)
+	_draw_baseline(axes, show_random_baseline, baseline_y)
 
-	if show_random_baseline:
-		axes.plot([0.0, 1.0], [0.0, 1.0], "--", color="gray", label="Random baseline")
-
-	axes.set_xlabel(x_label)
-	axes.set_ylabel(y_label)
-	axes.set_title(title)
-	axes.set_xlim(0.0, 1.0)
-	axes.set_ylim(0.0, 1.05)
-	axes.grid(True, alpha=0.3)
-	axes.legend(fontsize="small")
+	_style_curve_axes(axes, x_label, y_label, title)
+	# One column: config names are long, and two columns of them are wider than
+	# the square they sit under.
+	legend_top_left(axes, ncols=1)
 	figure.tight_layout()
 	return figure, axes
+
+
+def _unit_square_figure(side: float) -> tuple[plt.Figure, plt.Axes]:
+	"""ROC and PR both live on the unit square; drawing them wide distorts them.
+
+	A square box also makes "above the diagonal" and "how far from the top-left
+	corner" mean what the reader thinks they mean.
+	"""
+	figure, axes = plt.subplots(figsize=(side, side))
+	axes.set_box_aspect(1)
+	return figure, axes
+
+
+def _draw_baseline(axes: plt.Axes, diagonal: bool, level: float | None) -> None:
+	"""The no-skill reference: the diagonal for ROC, the positive rate for PR."""
+	if diagonal:
+		axes.plot(
+			[0.0, 1.0], [0.0, 1.0],
+			color=BASELINE, linestyle=DASH, linewidth=1.2, label="Chance",
+		)
+	if level is not None:
+		axes.axhline(
+			level, color=BASELINE, linestyle=DASH, linewidth=1.2,
+			label=f"Chance ({level:.3f})",
+		)
+
+
+def _style_curve_axes(axes: plt.Axes, x_label: str, y_label: str, title: str) -> None:
+	"""Axis limits and labels shared by the single-curve and combined figures."""
+	axes.set_xlabel(x_label)
+	axes.set_ylabel(y_label)
+	set_title(axes, title)
+	# A hair past the unit square: at exactly 1.0 the stroke is half-clipped by
+	# the frame, which reads as the curve stopping short.
+	axes.set_xlim(-0.015, 1.015)
+	axes.set_ylim(-0.015, 1.015)
+	ticks = np.linspace(0.0, 1.0, 6)
+	axes.set_xticks(ticks)
+	axes.set_yticks(ticks)
+	# The theme's default grid is horizontal-only, which suits a time series. On
+	# a unit square you read both coordinates off the same point, so both rule.
+	axes.grid(True, axis="both")
 
 
 def _validate_binary_inputs(

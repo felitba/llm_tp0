@@ -1,69 +1,41 @@
-# Transformers LLM Project
-
-## Project Overview
-This project explores the use of transformer-based models for predicting product purchase behavior in a supermarket setting. The goal is to model the Buy Through Rate (BTR) using product metadata, textual descriptions, and structured features from the supermarket catalog.
-
-The work is grounded in a dataset of supermarket products and is designed to support research, experimentation, and model development for recommendation and conversion prediction tasks.
-
-## Problem Statement
-We aim to predict whether a product will be bought based on its attributes and contextual information. The target variable is derived from the `bought` column and is used to estimate a purchase likelihood signal for each product listing.
-
-Key project goals include:
-- Understanding product-level purchase patterns
-- Building a transformer-inspired model architecture
-- Preprocessing and encoding product features
-- Evaluating model performance with appropriate metrics
-- Comparing model variants and ablations
-- Developing a personalization strategy for future extensions
-
-## Data
-The project uses the `dataset/supermarket_products.csv` dataset, which includes fields such as:
-- product title and description
-- price and category
-- purchase signals (`bought`, `cart`)
-- storage type and packaging attributes
-- ingredient and nutrition details
-- brand, dimensions, and country of origin
-
-The dataset is intended for train/validation/test splitting and downstream feature engineering.
+# Transformers
+TP1 - 73.69 Large Language Models - 2026
 
 ## Project Structure
-- `main.py` — training pipeline entry point
-- `model.py` — full transformer model implementation
-- `embedding.py` — product feature embedding logic
-- `tokenizer.py` — text/token preprocessing utilities
-- `positional_encoding.py` — positional encoding module
-- `encoding_block.py` — transformer encoder building block
-- `preprocess_dataset.py` — data preprocessing and feature preparation
-- `config/config.py` — configuration loading utilities
-- `config/config.json` — hyperparameter and training configuration
-- `dataset/supermarket_products.csv` — supermarket product dataset
 
-## Model Approach
-The project uses a transformer-style architecture for sequence-based product representation learning. The pipeline is expected to include:
-- text tokenization for titles and descriptions
-- embedding of categorical and numeric product features
-- positional encodings for ordering-sensitive modeling
-- encoder blocks for contextual representation learning
-- classification output for BTR prediction
+```text
+main.py                     train every experiment in a config file
+replot.py                   redraw every figure from saved results, no retrain
 
-## Development Workflow
-Planned workflow:
-1. Explore the dataset and formulate the prediction task
-2. Define the target variable and select relevant features
-3. Create preprocessing and encoding pipelines
-4. Build and train the transformer model
-5. Evaluate using classification metrics
-6. Run experiments and ablation studies
-7. Document design decisions and results
+config/     config.py       repo-root-relative paths + config loading
+            config.json     base hyperparameters and the experiments[] list
+            *.json          one file per ablation (text vs. feature tokens, ...)
+dataset/    supermarket_products.csv
+            preprocess_dataset.py   title split, drops, split-by-query, id encoding
+            product_dataset.py      DataFrame -> tensors -> DataLoaders
+            print_processed_data.py the split report writer
+model/      feature_tokenizer.py    a row -> [CLS] + title + numeric + categorical
+            encoding_block.py       the TransformerEncoder stack
+            encoder_only_model.py   tokenizer -> encoder -> CLS -> MLP head
+            checkpoint.py           save/load trained weights (opt-in)
+            positional_encoding.py  tokenizer.py
+metrics/    metrics.py      precision / recall / fall-out from confusion counts
+            run_results.py  what a run writes to disk, and how to read it back
+plots/      plot_theme.py   the deck palette: colors, fonts, line weights
+            threshold_curves.py     curves by sweeping every distinct score
+            pr_auc.py  roc_auc.py   the two axis choices
+            train_vs_val_error.py   the loss curve
+            experiment_plots.py     the plotting path main.py and replot.py share
+scripts/    eda_columns.py   eda_dataset.py   count_bought_by_title_tag.py
+baselines/  bert_model.py  visualize_trained_model.py   (side comparison)
+output/     every generated artifact; the only directory git ignores
+docs/       comentarios_para_el_equipo/
+```
 
-## Metrics
-The project includes evaluation using:
-- PR-AUC
-- ROC-AUC
-- Precision
-- Recall
-- Validation and test set performance tracking
+Source and generated files never share a directory: anything a run writes goes
+under `output/` (experiment runs, figures, EDA, reports), and `output/` is what
+`.gitignore` covers.
+
 
 ## Setup
 Requirements may include:
@@ -132,6 +104,7 @@ Optional experiment and training controls are available via CLI arguments, for e
 ```bash
 python main.py --experiment base
 python main.py --epochs 1 --no-plots
+python main.py --experiment base --save-weights
 ```
 
 ## Running Experiments
@@ -159,6 +132,37 @@ python main.py --experiment small_d64_l2 --epochs 1 --no-plots
 
 Training plots are saved under `output/experiments/<experiment_name>/`, and metrics for all selected experiments are written to `output/experiments/summary.csv`.
 
+### Saved results and replotting
+
+Every experiment also writes what it produced next to its figures, so no figure ever needs a retrain:
+
+| file | contents |
+| --- | --- |
+| `output/experiments/<name>/run.json` | merged config, per-epoch train/val loss and AUCs, test metrics, summary row |
+| `output/experiments/<name>/test_predictions.csv` | one row per test product, `label,probability` |
+
+The ROC and PR curves are integrated over every distinct score, so keeping the scores keeps every curve and threshold reproducible. `replot.py` reads those files back and redraws (it never imports torch):
+
+```bash
+python replot.py                                       # every saved run, plus the all-configs figures
+python replot.py medium_d96_l2_baseline medium_d128_l2 # only these
+python replot.py --config config/text_vs_feature_tokens.json --suffix text_vs_feature_tokens
+```
+
+`--suffix` names the combined figures `roc_auc_all_configs_<suffix>.jpg` / `pr_auc_all_configs_<suffix>.jpg`, so one config file's comparison does not overwrite another's.
+
+All figures — training, curves and EDA — take their colors, fonts and line weights from `plots/plot_theme.py`, the same palette as the slide deck. Change a hex there and `python replot.py` restyles the whole deck in seconds. Axis titles are off by default (the title lives on the slide); set `SHOW_AXES_TITLES = True` in `plots/plot_theme.py` to get them back while iterating locally.
+
+### Saved weights
+
+Weights are **not** saved by default. Ask for them per run:
+
+```bash
+python main.py --experiment medium_d96_l2_baseline --save-weights
+```
+
+That adds `output/experiments/<name>/model.pt` — the state early stopping restored, i.e. the weights the reported test metrics came from, together with the `cardinalities`, merged `config` and `categorical_id_mapping` needed to rebuild the model:
+
 ### Feature tokens vs. plain text
 
 `config/text_vs_feature_tokens.json` asks whether the encoder does better reading a row as feature tokens (one token per column, FT-Transformer style) or as a serialized `name: value | name: value` string handed to the text tokenizer alone. Architecture, optimizer and splits are identical across its three experiments, so only the representation differs:
@@ -176,30 +180,3 @@ python main.py --config config/text_vs_feature_tokens.json
 The combined `output/experiments/roc_auc_all_configs.jpg` then holds exactly those three curves. `all_text_every_column` also sees columns the control never does, so read it against `all_text_matched_columns` to tell "more columns" apart from "text instead of feature tokens".
 
 `text_column` in any config accepts a single column name, a list of column names, or `"all"` (everything `drop_columns` left, minus `text_exclude_columns`, which defaults to `bought` and `query_id`). Set `numeric_columns` and `categorical_columns` to `[]` to remove the tabular tokens entirely, and size `max_title_len` to the longest serialized row so nothing is truncated.
-
-## Collaboration
-This project is intended to be developed collaboratively. Please fill in the placeholders below as the team evolves.
-
-### Collaborators
-- Project Lead: [Collaborator 1 Name]
-- Data Analyst: [Collaborator 2 Name]
-- ML Engineer: [Collaborator 3 Name]
-- Reviewer / Documentation Lead: [Collaborator 4 Name]
-
-### Contribution Notes
-- Update the README as the project evolves
-- Keep experiments and model decisions documented
-- Record model hyperparameters and results in a reproducible way
-- Add notes for any personalization or extension work
-
-## Status
-This project is currently in active development. The implementation and experiments are expected to be expanded over time.
-
-## Notes
-This repository is intended for coursework, research, and collaborative experimentation around transformers for product conversion prediction.
-
-## Future Work
-- Add a richer personalization layer based on user and query context
-- Compare transformer models against baseline approaches
-- Improve preprocessing and feature engineering
-- Produce final presentation and project report
