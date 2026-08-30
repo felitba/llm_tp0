@@ -163,13 +163,25 @@ def train_one_experiment(
 	)
 
 	history = {"train": [], "val": []}
-	# Loss drives early stopping, but the AUCs are what the report compares, so
-	# keep them per epoch too: they are free here and unrecoverable later.
+	# Keep every validation metric: the configured primary metric picks the
+	# checkpoint, while loss remains useful for diagnosing overfitting.
 	epoch_metrics: list[dict[str, float]] = []
 	epochs = forced_epochs if forced_epochs is not None else int(config.get("epochs", 6))
 	early_stopping_patience = int(config.get("early_stopping_patience", 3))
 	early_stopping_min_delta = float(config.get("early_stopping_min_delta", 0.0))
-	best_val_loss = float("inf")
+	early_stopping_metric = str(config.get("early_stopping_metric", "val_pr_auc"))
+	metric_direction = {
+		"val_loss": "min",
+		"val_roc_auc": "max",
+		"val_pr_auc": "max",
+	}.get(early_stopping_metric)
+	if metric_direction is None:
+		raise ValueError(
+			"early_stopping_metric must be one of val_loss, val_roc_auc or val_pr_auc; "
+			f"got {early_stopping_metric!r}"
+		)
+	best_metric = float("inf") if metric_direction == "min" else float("-inf")
+	best_epoch = None
 	best_model_state = None
 	epochs_without_improvement = 0
 	cls_output_path = PROJECT_ROOT / "output" / "experiments" / name / "cls_btr_comparison.csv"
@@ -205,8 +217,19 @@ def train_one_experiment(
 			f"val_roc_auc={val_metrics['roc_auc']:.4f} val_pr_auc={val_metrics['pr_auc']:.4f}"
 		)
 
-		if float(val_metrics["loss"]) < best_val_loss - early_stopping_min_delta:
-			best_val_loss = float(val_metrics["loss"])
+		current_metric = float({
+			"val_loss": val_metrics["loss"],
+			"val_roc_auc": val_metrics["roc_auc"],
+			"val_pr_auc": val_metrics["pr_auc"],
+		}[early_stopping_metric])
+		improved = (
+			current_metric < best_metric - early_stopping_min_delta
+			if metric_direction == "min"
+			else current_metric > best_metric + early_stopping_min_delta
+		)
+		if improved:
+			best_metric = current_metric
+			best_epoch = epoch
 			best_model_state = copy.deepcopy(model.state_dict())
 			epochs_without_improvement = 0
 		elif early_stopping_patience > 0:
@@ -216,11 +239,6 @@ def train_one_experiment(
 				break
 
 	completed_epochs = len(history["val"])
-	best_epoch = (
-		min(range(len(history["val"])), key=history["val"].__getitem__) + 1
-		if history["val"]
-		else None
-	)
 	if best_model_state is not None:
 		model.load_state_dict(best_model_state)
 
@@ -244,6 +262,9 @@ def train_one_experiment(
 		"num_layers": int(config.get("num_layers")),
 		"learning_rate": float(config.get("learning_rate")),
 		"batch_size": int(config.get("batch_size", 64)),
+		"early_stopping_metric": early_stopping_metric,
+		"best_epoch": best_epoch,
+		"best_validation_metric": float(best_metric),
 		# How the row reached the encoder, so two rows of this file can be told
 		# apart when the ablation is representation rather than architecture.
 		"n_text_cols": len(splits["train"].attrs.get("text_columns", [])),
@@ -260,6 +281,12 @@ def train_one_experiment(
 		config=config,
 		history=history,
 		epoch_metrics=epoch_metrics,
+		selection={
+			"metric": early_stopping_metric,
+			"direction": metric_direction,
+			"best_epoch": best_epoch,
+			"best_value": float(best_metric),
+		},
 		test={
 			"loss": float(test_metrics["loss"]),
 			"roc_auc": float(test_metrics["roc_auc"]),

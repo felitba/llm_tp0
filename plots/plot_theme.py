@@ -20,46 +20,47 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.transforms import ScaledTranslation
 
-# ── Paleta ────────────────────────────────────────────────────────────────────
-ACCENT   = "#2563eb"   # serie principal: el modelo propuesto
-DEEP     = "#1d4ed8"   # variante oscura del acento (anotaciones sobre azul claro)
-LIGHT    = "#eef2fd"   # relleno suave: banda de confianza, área bajo la curva
+# ── Paleta: Okabe-Ito ─────────────────────────────────────────────────────────
+# El estándar para series categóricas en publicación científica, elegido porque
+# se distingue bajo los tres tipos de daltonismo. No es tab10: tab10 falla, su
+# verde y su naranja quedan a ΔE 0.7 bajo protanopia, o sea idénticos para quien
+# no distingue el rojo. Estos seis pasan las seis validaciones sobre blanco.
+BLUE       = "#0072B2"
+ORANGE     = "#E69F00"
+GREEN      = "#009E73"
+VERMILLION = "#D55E00"
+SKY        = "#56B4E9"
+PURPLE     = "#CC79A7"
+
+ACCENT   = BLUE        # serie principal: el modelo propuesto
+DEEP     = "#004b75"   # variante oscura del acento (anotaciones sobre azul claro)
+LIGHT    = "#e0eef6"   # relleno suave: banda de confianza, área bajo la curva
 INK      = "#1a1a1a"   # títulos y etiquetas de eje
 BODY     = "#404040"   # ticks, texto secundario
 MUTED    = "#737373"   # anotaciones y etiquetas menores
 BASELINE = "#999999"   # baselines y series de referencia (siempre punteadas)
 BORDER   = "#cccccc"   # grilla y spines
 SURFACE  = "#ffffff"   # fondo
-POS      = "#0f766e"   # mejora
-NEG      = "#b42318"   # degradación
+POS      = GREEN       # mejora
+NEG      = VERMILLION  # degradación
 
-# Multi-serie: análogos al azul, en este orden. Nunca más de cuatro.
-SERIES = [ACCENT, "#0ea5e9", "#14b8a6", MUTED]
-
-# ── Extensiones fuera del deck ────────────────────────────────────────────────
-# La regla de "nunca más de cuatro" vale para una filmina. Las ablaciones tienen
-# tantas curvas como experimentos declare el config (hoy cinco), así que las que
-# pasan de cuatro salen de acá y no del ciclo de colores por defecto de mpl.
-SERIES_EXTENDED = [
-	ACCENT,
-	"#0ea5e9",   # sky
-	"#14b8a6",   # teal
-	"#7c3aed",   # violeta
-	"#f59e0b",   # ámbar
-	"#0f766e",   # verde profundo
-	"#e11d48",   # rosa
-	MUTED,
-]
+# Orden fijo de asignación. El color sigue a la serie, nunca a su puesto en el
+# ranking: si un filtro saca una curva, las que quedan conservan su color.
+SERIES = [BLUE, ORANGE, GREEN, VERMILLION]
+SERIES_EXTENDED = [BLUE, ORANGE, GREEN, VERMILLION, SKY, PURPLE]
 
 # Clases del target: comprado vs. no comprado. El positivo es la clase rara
 # (BTR base 0.13), así que se lleva el color con peso y el negativo el gris.
 POSITIVE = POS         # bought = 1
 NEGATIVE = BASELINE    # bought = 0
-POSITIVE_LIGHT = "#d7f0ec"
-NEGATIVE_LIGHT = "#edeff4"
+POSITIVE_LIGHT = "#d6efe7"
+NEGATIVE_LIGHT = "#ededed"
 
 # Splits, cuando hay que distinguir train/val/test en una misma figura.
-SPLIT_COLORS = {"train": ACCENT, "validation": "#0ea5e9", "test": "#14b8a6"}
+# Azul y naranja son los dos primeros de la paleta y el par seguro clásico: train
+# y validation se dibujan como dos líneas finas superpuestas y cualquier par de
+# azules vecinos se lee como un solo color a ese grosor.
+SPLIT_COLORS = {"train": BLUE, "validation": ORANGE, "test": GREEN}
 
 DASH = (0, (4, 3))   # patrón único para baselines y líneas de referencia
 
@@ -68,19 +69,34 @@ DASH = (0, (4, 3))   # patrón único para baselines y líneas de referencia
 # en Linux, así que la figura sale igual en cualquier máquina del equipo.
 FONT_STACK = ["Helvetica Neue", "Helvetica", "Arial", "Liberation Sans", "DejaVu Sans"]
 
-# El título vive en la filmina, no en el ax. Poner True para verlos al iterar
-# en local sin tener que abrir el deck.
-SHOW_AXES_TITLES = False
+# Cada figura se explica sola: título arriba e hiperparámetros abajo del título.
+SHOW_AXES_TITLES = True
 
 
 def series_colors(count):
 	"""Colores para ``count`` series, en el orden en que se dibujan.
 
-	Hasta cuatro respeta SERIES (la regla del deck); de ahí en más cae en
-	SERIES_EXTENDED y, si aún así faltan, cicla.
+	Hasta cuatro respeta SERIES; de ahí en más cae en SERIES_EXTENDED y, si aún
+	así faltan, cicla. Pasadas las seis ranuras el color repetido deja de
+	identificar: usar ``series_styles`` en ese caso.
 	"""
 	palette = SERIES if count <= len(SERIES) else SERIES_EXTENDED
 	return [palette[index % len(palette)] for index in range(count)]
+
+
+def series_styles(count):
+	"""``(color, linestyle)`` por serie, para cuando son más que la paleta.
+
+	Un séptimo color no existe: sería un tono generado, indistinguible de alguno
+	de los seis bajo daltonismo. Lo que se hace es reciclar el color y cambiar el
+	trazo, así la identidad la cargan dos canales y no uno.
+	"""
+	palette = SERIES if count <= len(SERIES) else SERIES_EXTENDED
+	strokes = ["-", (0, (5, 2)), (0, (1, 1.6)), (0, (7, 2, 1.5, 2))]
+	return [
+		(palette[index % len(palette)], strokes[(index // len(palette)) % len(strokes)])
+		for index in range(count)
+	]
 
 
 def apply_theme(font=None, base=10):
@@ -163,43 +179,52 @@ def apply_theme(font=None, base=10):
 	})
 
 
-def legend_top_left(axes, ncols=None, gap=6.0):
-	"""Leyenda afuera del área de datos, arriba y alineada al borde izquierdo.
+def legend_top_left(axes, ncols=None, gap=6.0, subtitle=None):
+	"""Encabezado del ax, de arriba a abajo: título, subtítulo, leyenda, datos.
 
-	Adentro del cuadro la leyenda o se apoya sobre las curvas o obliga a buscar
-	la única esquina libre, que cambia de figura en figura. Arriba a la izquierda
-	está siempre en el mismo lugar y se lee antes que el gráfico, que es el orden
-	en que uno mira. El marco sobra porque ya no hay nada de qué separarla.
+	La leyenda va afuera del área de datos: adentro se apoya sobre las curvas o
+	obliga a buscar la única esquina libre, que cambia de figura en figura.
 
-	``gap`` va en puntos, no en fracción del ax, y esa es la parte que importa:
-	el llamador corre ``tight_layout()`` después de esto y el ax cambia de alto,
-	así que cualquier distancia medida como fracción deja de valer y la leyenda
-	se termina comiendo el título. En puntos, leyenda y título se mueven con el
-	borde del ax y la separación queda igual.
+	``subtitle`` es la línea de hiperparámetros: qué corrida es ésta, para que la
+	figura se explique sin volver al config.
+
+	Todo se apila en puntos, no en fracción del ax, y esa es la parte que
+	importa: el llamador corre ``tight_layout()`` después de esto y el ax cambia
+	de alto, así que cualquier distancia medida como fracción deja de valer y la
+	leyenda se termina comiendo el título.
 	"""
-	handles, labels = axes.get_legend_handles_labels()
-	if not handles:
-		return None
 	figure = axes.figure
-	anchor = axes.transAxes + ScaledTranslation(0, gap / 72, figure.dpi_scale_trans)
-	legend = axes.legend(
-		handles, labels,
-		loc="lower left",
-		bbox_to_anchor=(0.0, 1.0),
-		bbox_transform=anchor,
-		ncols=ncols if ncols else len(handles),
-		frameon=False,
-		borderaxespad=0.0,
-	)
+	handles, labels = axes.get_legend_handles_labels()
+	offset = gap
+	legend = None
+
+	if handles:
+		legend = axes.legend(
+			handles, labels,
+			loc="lower left",
+			bbox_to_anchor=(0.0, 1.0),
+			bbox_transform=_points_above(axes, offset),
+			ncols=ncols if ncols else len(handles),
+			frameon=False,
+			borderaxespad=0.0,
+		)
+		offset += _height_in_points(figure, legend) + gap
+
+	if subtitle:
+		text = axes.text(
+			0.5, 1.0, subtitle,
+			transform=_points_above(axes, offset),
+			ha="center", va="bottom",
+			fontsize=mpl.rcParams["font.size"] - 1, color=MUTED,
+		)
+		offset += _height_in_points(figure, text) + gap
+
 	if axes.get_title():
-		# El título va arriba de todo. ``pad`` también es en puntos, y es el
-		# mecanismo que matplotlib respeta cuando reacomoda títulos en cada draw.
-		figure.canvas.draw()
-		renderer = figure.canvas.get_renderer()
-		height = legend.get_window_extent(renderer).height * 72 / figure.dpi
+		# ``pad`` también es en puntos, y es el mecanismo que matplotlib respeta
+		# cuando reacomoda títulos en cada draw; ``title.set_y()`` se pisa solo.
 		axes.set_title(
 			axes.get_title(),
-			pad=2 * gap + height,
+			pad=offset,
 			fontdict={
 				"fontsize": axes.title.get_fontsize(),
 				"fontweight": axes.title.get_fontweight(),
@@ -209,9 +234,27 @@ def legend_top_left(axes, ncols=None, gap=6.0):
 	return legend
 
 
+def _points_above(axes, points):
+	"""Transform anclado al borde superior del ax, corrido ``points`` hacia arriba."""
+	return axes.transAxes + ScaledTranslation(
+		0, points / 72, axes.figure.dpi_scale_trans
+	)
+
+
+def _height_in_points(figure, artist):
+	"""Alto real del artista ya compuesto, en puntos.
+
+	Medido y no estimado: una leyenda de dos columnas o una etiqueta de dos
+	renglones desarma cualquier número fijo.
+	"""
+	figure.canvas.draw()
+	renderer = figure.canvas.get_renderer()
+	return artist.get_window_extent(renderer).height * 72 / figure.dpi
+
+
 def set_title(axes, title):
-	"""Título sólo si SHOW_AXES_TITLES; la versión del deck va sin él."""
-	if SHOW_AXES_TITLES:
+	"""Título sólo si SHOW_AXES_TITLES."""
+	if SHOW_AXES_TITLES and title:
 		axes.set_title(title)
 
 

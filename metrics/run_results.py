@@ -44,6 +44,7 @@ class RunResults:
 	config: dict[str, Any] = field(default_factory=dict)
 	history: dict[str, list[float]] = field(default_factory=dict)
 	epoch_metrics: list[dict[str, float]] = field(default_factory=list)
+	selection: dict[str, Any] = field(default_factory=dict)
 	test: dict[str, float] = field(default_factory=dict)
 	summary: dict[str, Any] = field(default_factory=dict)
 	labels: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
@@ -91,6 +92,7 @@ def save_run(results: RunResults) -> Path:
 			key: [float(value) for value in values] for key, values in results.history.items()
 		},
 		"epoch_metrics": results.epoch_metrics,
+		"selection": results.selection,
 		"test": {key: float(value) for key, value in results.test.items()},
 		"summary": results.summary,
 		"predictions_file": PREDICTIONS_FILE,
@@ -118,6 +120,7 @@ def load_run(name: str) -> RunResults:
 		config=payload.get("config", {}),
 		history=payload.get("history", {}),
 		epoch_metrics=payload.get("epoch_metrics", []),
+		selection=payload.get("selection", {}),
 		test=payload.get("test", {}),
 		summary=payload.get("summary", {}),
 		labels=labels,

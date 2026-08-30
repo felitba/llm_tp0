@@ -19,13 +19,33 @@ from metrics.run_results import EXPERIMENTS_DIR, RunResults
 from plots.plot_theme import save
 
 
+def training_hyperparameters(config: dict) -> str:
+	"""Render the effective run configuration beneath its loss curve."""
+	return (
+		f"d_model={int(config.get('d_model', 0))} · "
+		f"heads={int(config.get('n_heads', 0))} · "
+		f"layers={int(config.get('num_layers', 0))} · "
+		f"FFN={int(config.get('dim_feedforward', 0))}\n"
+		f"lr={float(config.get('learning_rate', 0.0)):.0e} · "
+		f"dropout={float(config.get('dropout', 0.0)):.2f} · "
+		f"weight decay={float(config.get('weight_decay', 0.0)):.2g} · "
+		f"batch={int(config.get('batch_size', 0))} · "
+		f"max text length={int(config.get('max_title_len', 0))}"
+	)
+
+
 def plot_run(results: RunResults) -> list[Path]:
 	"""Save loss, PR and ROC figures for one experiment next to its run.json."""
 	output_dir = results.directory
 	output_paths = []
 
 	if results.history.get("train"):
-		figure, _ = plot_training_progress(results.history)
+		figure, _ = plot_training_progress(
+			results.history,
+			best_epoch=results.selection.get("best_epoch"),
+			title=f"{results.name} — Training vs. Validation Loss",
+			hyperparameters=training_hyperparameters(results.config),
+		)
 		output_paths.append(save(figure, output_dir / "loss.jpg"))
 
 	if not results.has_curves:

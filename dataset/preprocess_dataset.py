@@ -108,6 +108,7 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     df, text_column = build_text_column(df, source_columns)
 
     splits = split_dataset(df, config_data)
+    splits = normalize_splits(splits, config_data)
     splits = encode_categorical_ids(splits, config_data)
     for split in splits.values():
         # text_column is the one to read; text_columns is what went into it, which
@@ -115,34 +116,54 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
         split.attrs["text_column"] = text_column
         split.attrs["text_columns"] = source_columns
 
-    # DECISION (2026-08-24): price and nutrition_score stay on their raw scale for
-    # now, so the first FT-Transformer run shows what the numeric tokens do without
-    # a scaling choice mixed into the result.
-    # When we do normalize, it belongs right here, and as three steps: fit the
-    # scaler on splits["train"] only, then apply those same frozen statistics to
-    # all three splits. Fitting before the split lets validation/test values set
-    # the scale the model trains on. normalize_data below is the old whole-frame
-    # version and would leak; rewrite it to take the splits before calling it.
     return splits
 
 def drop_columns(df: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
     """Drop the columns specified in config.json."""
     return df.drop(columns=config_columns("drop_columns", config), errors="ignore")
 
-def normalize_data(df: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
-    """Normalize the dataset using min-max normalization.
+def normalize_splits(
+    splits: Dict[str, pd.DataFrame], config: dict | None = None
+) -> Dict[str, pd.DataFrame]:
+    """Impute and standardize configured numeric columns without leaking splits.
 
-    UNUSED (2026-08-24): kept for reference only. min()/max() over whatever frame
-    it is handed means calling it before the split fits the scale on validation and
-    test rows too. See the note in get_data_processed before wiring it back in.
+    The median, mean and standard deviation are fitted on ``train`` only. They are
+    then frozen for validation and test, which is essential: fitting a scaler on
+    the complete dataframe would let held-out rows influence the representation the
+    model learns. Missing values receive the train median before scaling; a
+    constant column is mapped to zero instead of dividing by zero.
+
+    Text serialization has deliberately already happened at this point, while
+    category names were still available. Therefore this function scales numeric
+    *feature tokens* only; all-text experiments retain their literal serialized
+    values as intended.
     """
-    columns = config_columns("normalize_columns", config)
+    columns = [
+        column
+        for column in config_columns("normalize_columns", config)
+        if column in splits["train"].columns
+    ]
+    statistics: dict[str, dict[str, float]] = {}
 
-    if columns:
-        df[columns] = (df[columns] - df[columns].min()) / (
-            df[columns].max() - df[columns].min()
-        )
-    return df
+    for column in columns:
+        train_values = pd.to_numeric(splits["train"][column], errors="coerce")
+        train_values = train_values.replace([np.inf, -np.inf], np.nan)
+        median = float(train_values.median()) if train_values.notna().any() else 0.0
+        filled_train = train_values.fillna(median)
+        mean = float(filled_train.mean())
+        std = float(filled_train.std(ddof=0))
+        if not np.isfinite(std) or std == 0.0:
+            std = 1.0
+
+        statistics[column] = {"median": median, "mean": mean, "std": std}
+        for split in splits.values():
+            values = pd.to_numeric(split[column], errors="coerce")
+            values = values.replace([np.inf, -np.inf], np.nan).fillna(median)
+            split[column] = ((values - mean) / std).astype(np.float32)
+
+    for split in splits.values():
+        split.attrs["numeric_normalization"] = statistics
+    return splits
 
 def encode_categorical_ids(
     splits: Dict[str, pd.DataFrame], config: dict | None = None

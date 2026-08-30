@@ -7,51 +7,42 @@
   "num_layers": 2,
   "dim_feedforward": 192,
   "learning_rate": 0.0003,
-  "epochs": 500,
+  "epochs": 100,
   "train_split": 0.8,
   "validation_split": 0.1,
   "test_split": 0.1,
   "split_seed": 42,
-  "dropout": 0.1,
+  "dropout": 0.3,
   "batch_size": 64,
-  "weight_decay": 0.01,
+  "weight_decay": 0.02,
   "early_stopping_patience": 100,
   "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
   "activation": "relu",
   "encoding": "gpt2",
   "seed": 42,
-  "drop_columns": ["title", "description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart"],
+  "drop_columns": ["title", "description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart","ingredients"],
   "normalize_columns": ["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"],
-  "categorical_columns": ["category", "allergens", "title_tag", "brand", "storage_type"],
-  "numeric_columns": ["price", "nutrition_score"],
-  "text_column": "product_name",
+  "categorical_columns": ["category", "allergens", "title_tag", "brand", "storage_type","country_of_origin"],
+  "numeric_columns": ["price", "nutrition_score","filter_price_min", "filter_price_max", "net_weight_oz"],
+  "text_column": ["product_name"],
   "max_title_len": 10,
   "experiments": [
     {
       "name": "feature_tokens",
-      "_comment": "Control. Sequence is [CLS] + 10 product_name subwords + 2 numeric tokens + 5 categorical tokens = 18 positions.",
+      "_comment": "Control. product_name receives up to 10 text tokens, then the five numeric and six categorical values each receive one feature token. ingredients is deliberately dropped for both representations.",
       "overrides": {}
     },
     {
       "name": "all_text_matched_columns",
-      "_comment": "The same eight columns the control uses, serialized as 'name: value | name: value' and read only by the text tokenizer. No numeric or categorical tokens at all, so a win or loss here is about representation, not about which columns the model saw. Longest train row is 60 subwords.",
+      "_comment": "The same 12 columns the control uses, serialized as 'name: value | name: value' and read only by the text tokenizer. No numeric or categorical tokens at all, so a win or loss here is about representation, not about which columns the model saw. ingredients is deliberately excluded because drop_columns removes it.",
       "overrides": {
-        "text_column": ["product_name", "brand", "category", "storage_type", "allergens", "title_tag", "price", "nutrition_score"],
-        "numeric_columns": [],
-        "categorical_columns": [],
-        "max_title_len": 64
-      }
-    },
-    {
-      "name": "all_text_every_column",
-      "_comment": "Every column drop_columns leaves, minus the label and query_id, serialized the same way: adds filter_price_min/max, net_weight_oz, ingredients and country_of_origin, which the control never sees. Compare against all_text_matched_columns to separate 'more columns' from 'text instead of feature tokens'. Longest train row is 111 subwords.",
-      "overrides": {
-        "text_column": "all",
-        "text_exclude_columns": ["bought", "query_id"],
+        "text_column": ["product_name", "brand", "category", "storage_type", "allergens", "title_tag", "price", "nutrition_score","filter_price_min", "filter_price_max", "net_weight_oz","country_of_origin"],
         "numeric_columns": [],
         "categorical_columns": [],
         "max_title_len": 112
       }
     }
+
   ]
 }
