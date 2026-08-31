@@ -56,6 +56,21 @@ def get_bert_predictions():
     return df['bought'].values, np.array(bert_probs)
 
 
+def discover_experiment_directories(base_dir: Path) -> list[str]:
+    """Scans base_dir and returns names of folders containing experiment predictions."""
+    if not base_dir.exists():
+        return []
+
+    experiment_names = []
+    for entry in sorted(base_dir.iterdir()):
+        if entry.is_dir():
+            # Check if directory contains a test predictions file or a run.json
+            if (entry / "test_predictions.csv").exists() or (entry / "run.json").exists():
+                experiment_names.append(entry.name)
+
+    return experiment_names
+
+
 def load_custom_experiment(exp_name: str):
     """Reads test labels and probabilities from test_predictions.csv."""
     exp_dir = Path(f"output/experiments/{exp_name}")
@@ -91,36 +106,50 @@ def load_custom_experiment(exp_name: str):
 
 
 def main():
-    custom_experiment_names = [
-        "grid_d_model64_n_heads2_num_layers2_dim_feedforward128",
-        "grid_d_model64_n_heads2_num_layers2_dim_feedforward256",
-        "grid_d_model64_n_heads2_num_layers2_dim_feedforward512"
-    ]
+    experiments_dir = Path("output/experiments")
+
+    # 1. Automatically find all custom experiment folders
+    custom_experiment_names = discover_experiment_directories(experiments_dir)
+
+    if not custom_experiment_names:
+        print(f"No valid experiment folders found in {experiments_dir}")
+        return
+
+    print(f"Found {len(custom_experiment_names)} custom experiment(s):")
+    for name in custom_experiment_names:
+        print(f" - {name}")
 
     results_by_config = []
 
-    # 1. Load probabilities from Custom Transformer Models
+    # 2. Load probabilities from all discovered Custom Transformer Models
     for exp_name in custom_experiment_names:
-        labels, probs = load_custom_experiment(exp_name)
-        results_by_config.append((exp_name, labels, probs))
-        print(f"Loaded custom model predictions: {exp_name}")
+        try:
+            labels, probs = load_custom_experiment(exp_name)
+            results_by_config.append((exp_name, labels, probs))
+            print(f"Successfully loaded: {exp_name}")
+        except Exception as e:
+            print(f"Skipping {exp_name}: {e}")
 
-    # 2. Get probabilities from BERT
-    bert_labels, bert_probs = get_bert_predictions()
-    results_by_config.append(("BERT Baseline", bert_labels, bert_probs))
+    # 3. Get probabilities from BERT Baseline
+    try:
+        bert_labels, bert_probs = get_bert_predictions()
+        results_by_config.append(("BERT Baseline", bert_labels, bert_probs))
+    except Exception as e:
+        print(f"Could not load BERT baseline: {e}")
 
-    # 3. Generate and Save Combined Plots
+    if not results_by_config:
+        print("No valid predictions loaded. Exiting...")
+        return
+
+    # 4. Generate and Save Combined Plots
     print("\nGenerating combined ROC and PR curves...")
 
-    output_dir = Path("output/experiments")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     roc_fig, _ = plot_roc_auc_by_config(results_by_config)
-    roc_path = save(roc_fig, output_dir / "roc_auc_bert_vs_custom.jpg")
+    roc_path = save(roc_fig, experiments_dir / "roc_auc_bert_vs_custom.jpg")
     print(f"Saved ROC comparison plot to: {roc_path}")
 
     pr_fig, _ = plot_pr_auc_by_config(results_by_config)
-    pr_path = save(pr_fig, output_dir / "pr_auc_bert_vs_custom.jpg")
+    pr_path = save(pr_fig, experiments_dir / "pr_auc_bert_vs_custom.jpg")
     print(f"Saved PR comparison plot to: {pr_path}")
 
 
