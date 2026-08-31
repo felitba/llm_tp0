@@ -88,6 +88,60 @@ def split_dataset(df: pd.DataFrame, config: dict | None = None) -> Dict[str, pd.
 
     return {name: df[split_of_row == name].copy() for name in SPLIT_NAMES}
 
+
+def separate_bought_true(
+    df: pd.DataFrame,
+    ratios: tuple[float, float, float] = (0.8, 0.1, 0.1),
+    seed: int = 42,
+) -> pd.Series:
+    """Assign query_id to train/validation/test, splitting only bought=true queries.
+
+    Queries with at least one bought=True are distributed by the supplied ratios,
+    while all other queries stay in training so the labeled positive cases remain
+    the only ones that get split across validation/test.
+    """
+    positive_queries = (
+        df.loc[df["bought"] == 1, "query_id"]
+        .drop_duplicates()
+        .sample(frac=1, random_state=seed)
+        .reset_index(drop=True)
+    )
+
+    if positive_queries.empty:
+        return pd.Series(index=df["query_id"].drop_duplicates(), dtype=object)
+
+    split_of_query = pd.Series("train", index=df["query_id"].drop_duplicates())
+    cutoffs = np.cumsum(np.array(ratios, dtype=float) / sum(ratios))[:-1]
+    position = np.arange(len(positive_queries), dtype=float) / len(positive_queries)
+    split_index = np.searchsorted(cutoffs, position, side="right")
+    split_by_query = pd.Series(np.array(SPLIT_NAMES)[split_index], index=positive_queries)
+    split_of_query.loc[positive_queries] = split_by_query
+    return split_of_query
+
+
+def split_dataset_by_bought_true(
+    df: pd.DataFrame,
+    config: dict | None = None,
+) -> Dict[str, pd.DataFrame]:
+    """Split the dataset with bought=true queries split at 80/10/10.
+
+    This mirrors split_dataset, but only query_ids with at least one bought=True
+    are distributed across train/validation/test according to the specified
+    ratios. Queries without a positive label remain in train.
+    """
+    config_data = config or load_config()
+
+    ratios = (
+        float(config_data.get("train_split", 0.8)),
+        float(config_data.get("validation_split", 0.1)),
+        float(config_data.get("test_split", 0.1)),
+    )
+    split_of_query = separate_bought_true(df, ratios, int(config_data.get("split_seed", 42)))
+    split_of_row = df["query_id"].map(split_of_query)
+
+    return {name: df[split_of_row == name].copy() for name in SPLIT_NAMES}
+
+
 def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     """Load data and return train/validation/test splits according to config.json.
 
@@ -107,7 +161,8 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     source_columns = text_columns(df, config_data)
     df, text_column = build_text_column(df, source_columns)
 
-    splits = split_dataset(df, config_data)
+    splits = split_dataset_by_bought_true(df, config_data)
+    # splits = split_dataset(df, config_data)
     splits = normalize_splits(splits, config_data)
     splits = encode_categorical_ids(splits, config_data)
     for split in splits.values():

@@ -1,24 +1,24 @@
 {
   "_comment": "Ablation: does the encoder do better reading the row as feature tokens (one token per column, FT-Transformer style) or as plain serialized text? Run with: python main.py --config config/text_vs_feature_tokens.json. Architecture, optimizer and splits are identical across the three experiments, so the only difference is how a row reaches the encoder.",
   "dataset_path": "dataset/supermarket_products.csv",
-  "d_model": 96,
+  "d_model": 156,
   "vocab_size": 50257,
-  "n_heads": 4,
+  "n_heads":12,
   "num_layers": 2,
   "dim_feedforward": 192,
   "learning_rate": 0.0003,
-  "epochs": 100,
+  "epochs": 30,
   "train_split": 0.8,
   "validation_split": 0.1,
   "test_split": 0.1,
   "split_seed": 42,
   "dropout": 0.3,
   "batch_size": 64,
-  "weight_decay": 0.02,
+  "weight_decay": 0.03,
   "early_stopping_patience": 100,
   "early_stopping_min_delta": 0.0001,
   "early_stopping_metric": "val_pr_auc",
-  "activation": "relu",
+  "activation": "gelu",
   "encoding": "gpt2",
   "seed": 42,
   "drop_columns": ["title", "description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart","ingredients"],
@@ -32,16 +32,6 @@
       "name": "feature_tokens",
       "_comment": "Control. product_name receives up to 10 text tokens, then the five numeric and six categorical values each receive one feature token. ingredients is deliberately dropped for both representations.",
       "overrides": {}
-    },
-    {
-      "name": "all_text_matched_columns",
-      "_comment": "The same 12 columns the control uses, serialized as 'name: value | name: value' and read only by the text tokenizer. No numeric or categorical tokens at all, so a win or loss here is about representation, not about which columns the model saw. ingredients is deliberately excluded because drop_columns removes it.",
-      "overrides": {
-        "text_column": ["product_name", "brand", "category", "storage_type", "allergens", "title_tag", "price", "nutrition_score","filter_price_min", "filter_price_max", "net_weight_oz","country_of_origin"],
-        "numeric_columns": [],
-        "categorical_columns": [],
-        "max_title_len": 112
-      }
     }
 
   ]
