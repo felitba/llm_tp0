@@ -1,0 +1,79 @@
+{
+  "_comment": "Coordinate/greedy-style hyperparameter search. Each group changes only one hyperparameter and is selected by validation PR-AUC, never test metrics. Dropout candidates keep weight_decay=0.02 and learning_rate=3e-4 fixed. Weight-decay candidates keep dropout=0.30 and learning_rate=3e-4 fixed; its 0.02 reference is already the dropout=0.30 run. Learning-rate candidates keep dropout=0.30 and weight_decay=0.02 fixed.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 6,
+  "num_layers": 4,
+  "dim_feedforward": 512,
+  "learning_rate": 0.0001,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.03,
+  "early_stopping_patience": 100,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "seed": 42,
+  "drop_columns": ["title", "description", "filter_category", "filter_storage_type", "package_size", "unit_of_measure", "dimensions_in", "timestamp", "cart", "ingredients"],
+  "normalize_columns": ["price", "filter_price_min", "filter_price_max", "net_weight_oz", "nutrition_score"],
+  "categorical_columns": ["category", "allergens", "title_tag", "brand", "storage_type", "country_of_origin"],
+  "numeric_columns": ["price", "nutrition_score", "filter_price_min", "filter_price_max", "net_weight_oz"],
+  "text_column": ["product_name"],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "greedy_feature_dropout_010",
+      "_comment": "Feature tokens, stage 1 candidate: dropout=0.10.",
+      "overrides": {"dropout": 0.1}
+    },
+    {
+      "name": "greedy_feature_dropout_020",
+      "_comment": "Feature tokens, stage 1 candidate: dropout=0.20.",
+      "overrides": {"dropout": 0.2}
+    },
+    {
+      "name": "greedy_feature_dropout_030",
+      "_comment": "Feature tokens, stage 1 candidate: dropout=0.30.",
+      "overrides": {"dropout": 0.3}
+    },
+
+    {
+      "name": "greedy_feature_weight_decay_010",
+      "_comment": "Feature tokens, weight-decay stage: weight_decay=0.01; dropout=0.30 and lr=3e-4 stay fixed.",
+      "overrides": {"weight_decay": 0.01}
+    },
+    {
+      "name": "greedy_feature_weight_decay_030",
+      "_comment": "Feature tokens, weight-decay stage: weight_decay=0.03; dropout=0.30 and lr=3e-4 stay fixed.",
+      "overrides": {"weight_decay": 0.03}
+    },
+    {
+      "name": "greedy_feature_weight_decay_030",
+      "_comment": "Feature tokens, weight-decay stage: weight_decay=0.03; dropout=0.30 and lr=3e-4 stay fixed.",
+      "overrides": {"weight_decay": 0.05}
+    },
+
+    {
+      "name": "greedy_feature_learning_rate_003",
+      "_comment": "Feature tokens, learning-rate stage: lr=0.003; dropout=0.30 and weight_decay=0.02 stay fixed.",
+      "overrides": {"learning_rate": 0.003}
+    },
+    {
+      "name": "greedy_feature_learning_rate_0005",
+      "_comment": "Feature tokens, learning-rate stage: lr=0.0005; dropout=0.30 and weight_decay=0.02 stay fixed.",
+      "overrides": {"learning_rate": 0.0005}
+    },
+    {
+      "name": "greedy_feature_learning_rate_0001",
+      "_comment": "Feature tokens, learning-rate stage: lr=0.0001; dropout=0.30 and weight_decay=0.02 stay fixed.",
+      "overrides": {"learning_rate": 0.0001}
+    }
+  ]
+}
