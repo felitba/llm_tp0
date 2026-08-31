@@ -35,6 +35,15 @@ class EncodingBlock(nn.Module):
         self.encoder = nn.TransformerEncoder(
             encoder_layer,
             num_layers=self.num_layers, # number of transformer encoder layers
+            # Off because the padded positions of our sequence are interior, not a
+            # right-hand tail: [CLS] + title subwords + tabular tokens puts real
+            # tokens after the title padding. nn.TransformerEncoder tests that with
+            # _nested_tensor_from_mask_left_aligned, which MPS does not implement,
+            # so the all-text arms crash on the validation pass without this. It is
+            # only ever a way to skip work on padded positions -- the attention
+            # output is identical either way, since src_key_padding_mask masks
+            # those positions regardless.
+            enable_nested_tensor=False,
         )
 
     def forward(
