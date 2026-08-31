@@ -161,8 +161,8 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
     source_columns = text_columns(df, config_data)
     df, text_column = build_text_column(df, source_columns)
 
-    splits = split_dataset_by_bought_true(df, config_data)
-    # splits = split_dataset(df, config_data)
+    # splits = split_dataset_by_bought_true(df, config_data)
+    splits = split_dataset(df, config_data)
     splits = normalize_splits(splits, config_data)
     splits = encode_categorical_ids(splits, config_data)
     for split in splits.values():

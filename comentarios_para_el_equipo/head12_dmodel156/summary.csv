@@ -1,2 +1,0 @@
-name,epochs,d_model,n_heads,num_layers,learning_rate,batch_size,n_text_cols,max_title_len,n_numeric_cols,n_categorical_cols,test_loss,test_roc_auc,test_pr_auc
-feature_tokens,30,156,12,2,0.0003,64,1,10,5,6,0.2382436391386219,0.9679529706619491,0.8663619257743767
