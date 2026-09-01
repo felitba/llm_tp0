@@ -79,10 +79,17 @@ def create_data_loaders(
 		splits["test"], numeric_cols, categorical_cols, target_col, max_title_len, vocab_size
 	)
 
+	# Every iter(DataLoader) draws a base seed from torch's global RNG, shuffle or
+	# not. Left on the global generator, each extra evaluation pass (validation
+	# every epoch, and test every epoch since epoch_predictions) shifts the train
+	# shuffle of every later epoch, so "how often we evaluate" silently becomes a
+	# training hyperparameter. A private generator for the eval loaders keeps the
+	# training trajectory a function of `seed` alone.
+	eval_generator = torch.Generator().manual_seed(0)
 	return ProductDataLoaders(
 		train=DataLoader(train_ds, batch_size=batch_size, shuffle=True),
-		validation=DataLoader(val_ds, batch_size=batch_size, shuffle=False),
-		test=DataLoader(test_ds, batch_size=batch_size, shuffle=False),
+		validation=DataLoader(val_ds, batch_size=batch_size, shuffle=False, generator=eval_generator),
+		test=DataLoader(test_ds, batch_size=batch_size, shuffle=False, generator=eval_generator),
 	)
 
 

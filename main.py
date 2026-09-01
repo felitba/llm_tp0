@@ -11,14 +11,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from config.config import PROJECT_ROOT, load_config
+from config.config import load_config
+from config.experiments import expand_experiments, experiment_names
 from dataset.preprocess_dataset import categorical_cardinalities, get_data_processed
 from dataset.product_dataset import ProductDataLoaders, create_data_loaders
 from plots.experiment_plots import plot_run, plot_runs_combined
 from plots.pr_auc import pr_auc_score
 from plots.roc_auc import roc_auc_score
 from metrics.error_analysis import build_error_analysis, error_summary, write_error_analysis
-from metrics.run_results import EXPERIMENTS_DIR, RunResults, save_run
+from metrics.run_results import (
+	RunResults, output_dir_from_config, run_dir, save_run, write_summary_csv,
+)
 from model.checkpoint import save_checkpoint
 from model.encoder_only_model import EncoderOnlyModel
 
@@ -30,30 +33,11 @@ def set_seed(seed: int = 42) -> None:
 	torch.cuda.manual_seed_all(seed)
 
 
-def merged_config(base_config: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
-	"""Return a copy of base_config with one experiment's overrides applied."""
-	config = copy.deepcopy(base_config)
-	config.update(overrides)
-	return config
-
-
 def experiment_configs(
 	base_config: dict[str, Any], selected_name: str | None = None
 ) -> list[tuple[str, dict[str, Any]]]:
-	"""Build the list of experiment configs from config.json."""
-	experiments = base_config.get("experiments") or [{"name": "base", "overrides": {}}]
-	selected = []
-	for index, experiment in enumerate(experiments, start=1):
-		name = str(experiment.get("name", f"experiment_{index}"))
-		if selected_name is not None and name != selected_name:
-			continue
-		overrides = dict(experiment.get("overrides", {}))
-		selected.append((name, merged_config(base_config, overrides)))
-
-	if selected_name is not None and not selected:
-		available = ", ".join(str(exp.get("name")) for exp in experiments)
-		raise ValueError(f"Unknown experiment '{selected_name}'. Available: {available}")
-	return selected
+	"""The runs a config file declares: experiments x seeds (config/experiments.py)."""
+	return expand_experiments(base_config, selected_name)
 
 
 def run_epoch(
@@ -190,7 +174,14 @@ def train_one_experiment(
 	best_epoch = None
 	best_model_state = None
 	epochs_without_improvement = 0
-	cls_output_path = PROJECT_ROOT / "output" / "experiments" / name / "cls_btr_comparison.csv"
+	# Validation and test probabilities at every epoch. Test is scored here but
+	# never read here: selection below uses validation only. Storing it is what
+	# lets scripts/reselect.py apply another checkpoint rule without retraining.
+	# The eval loaders do not shuffle, so row order is the same at every epoch.
+	epoch_val_probs: list[np.ndarray] = []
+	epoch_test_probs: list[np.ndarray] = []
+	eval_reference: dict[str, np.ndarray] = {}
+	cls_output_path = run_dir(name) / "cls_btr_comparison.csv"
 	if print_cls_btr and cls_output_path.exists():
 		cls_output_path.unlink()
 
@@ -205,6 +196,16 @@ def train_one_experiment(
 			print_cls_btr=print_cls_btr, split_name="validation",
 			cls_output_path=cls_output_path if print_cls_btr else None, epoch=epoch,
 		)
+		test_epoch = run_epoch(model, loaders.test, criterion, device)
+		epoch_val_probs.append(np.asarray(val_metrics["probs"], dtype=np.float32))
+		epoch_test_probs.append(np.asarray(test_epoch["probs"], dtype=np.float32))
+		if not eval_reference:
+			eval_reference = {
+				"val_labels": np.asarray(val_metrics["labels"], dtype=np.int8),
+				"val_row_ids": np.asarray(val_metrics["row_ids"], dtype=np.int64),
+				"test_labels": np.asarray(test_epoch["labels"], dtype=np.int8),
+				"test_row_ids": np.asarray(test_epoch["row_ids"], dtype=np.int64),
+			}
 		history["train"].append(float(train_metrics["loss"]))
 		history["val"].append(float(val_metrics["loss"]))
 		epoch_metrics.append({
@@ -245,13 +246,38 @@ def train_one_experiment(
 				break
 
 	completed_epochs = len(history["val"])
-	best_epoch = (
+	# best_epoch is the epoch whose weights the test row reports (best
+	# early_stopping_metric). The val-loss minimum is recorded next to it so a
+	# checkpoint picked on a rank metric can be checked against a proper scoring
+	# rule: a large gap between the two means PR-AUC kept drifting up on a small
+	# validation set while the model was already overconfident.
+	min_val_loss_epoch = (
 		min(range(len(history["val"])), key=history["val"].__getitem__) + 1
 		if history["val"]
 		else None
 	)
 	if best_model_state is not None:
 		model.load_state_dict(best_model_state)
+	selected = epoch_metrics[best_epoch - 1] if best_epoch else {}
+	selection = {
+		"metric": early_stopping_metric,
+		"epoch": best_epoch,
+		"val_loss": selected.get("val_loss"),
+		"val_pr_auc": selected.get("val_pr_auc"),
+		"val_roc_auc": selected.get("val_roc_auc"),
+		"min_val_loss_epoch": min_val_loss_epoch,
+		"min_val_loss": min(history["val"]) if history["val"] else None,
+	}
+	if best_epoch and min_val_loss_epoch:
+		by_metric = (
+			f"{early_stopping_metric}={selected.get(early_stopping_metric):.4f}, "
+			if early_stopping_metric != "val_loss"
+			else ""
+		)
+		print(
+			f"[{name}] checkpoint: epoch {best_epoch} ({by_metric}val_loss={selected['val_loss']:.4f}); "
+			f"min val_loss={selection['min_val_loss']:.4f} at epoch {min_val_loss_epoch}"
+		)
 
 	test_metrics = run_epoch(
 		model, loaders.test, criterion, device,
@@ -284,7 +310,7 @@ def train_one_experiment(
 		splits["test"], test_row_ids,
 		test_metrics["labels"], test_metrics["probs"],
 	)
-	print(f"[{name}] Error analysis written to: {write_error_analysis(EXPERIMENTS_DIR / name, errors)}")
+	print(f"[{name}] Error analysis written to: {write_error_analysis(run_dir(name), errors)}")
 	for column in ("title_tag", "category"):
 		summary = error_summary(errors, column)
 		if not summary.empty:
@@ -320,6 +346,10 @@ def train_one_experiment(
 		"max_title_len": int(config.get("max_title_len")),
 		"n_numeric_cols": len(config.get("numeric_columns", [])),
 		"n_categorical_cols": len(config.get("categorical_columns", [])),
+		# Which weights the test columns describe, and by what rule they were picked.
+		"selection_metric": early_stopping_metric,
+		"selected_epoch": best_epoch,
+		"min_val_loss_epoch": min_val_loss_epoch,
 		"test_loss": float(test_metrics["loss"]),
 		"test_roc_auc": float(test_metrics["roc_auc"]),
 		"test_pr_auc": float(test_metrics["pr_auc"]),
@@ -330,6 +360,7 @@ def train_one_experiment(
 		config=config,
 		history=history,
 		epoch_metrics=epoch_metrics,
+		selection=selection,
 		test={
 			"loss": float(test_metrics["loss"]),
 			"roc_auc": float(test_metrics["roc_auc"]),
@@ -343,6 +374,12 @@ def train_one_experiment(
 		split_row_ids=split_row_ids,
 		row_ids=test_row_ids,
 		query_ids=query_ids,
+		epoch_predictions={
+			"epochs": np.arange(1, completed_epochs + 1, dtype=np.int64),
+			"val_probs": np.stack(epoch_val_probs),
+			"test_probs": np.stack(epoch_test_probs),
+			**eval_reference,
+		},
 		duration_seconds=time.perf_counter() - started_at,
 	)
 	# Save before plotting: the numbers are the expensive part, the figures are
@@ -366,15 +403,8 @@ def train_one_experiment(
 
 
 def write_experiment_summary(rows: list[dict[str, float | str]]) -> Path:
-	"""Write experiment metrics to output/experiments/summary.csv."""
-	EXPERIMENTS_DIR.mkdir(parents=True, exist_ok=True)
-	output_path = EXPERIMENTS_DIR / "summary.csv"
-	headers = list(rows[0])
-	with output_path.open("w", encoding="utf-8") as file:
-		file.write(",".join(headers) + "\n")
-		for row in rows:
-			file.write(",".join(str(row[header]) for header in headers) + "\n")
-	return output_path
+	"""Write experiment metrics to <output_dir>/summary.csv."""
+	return write_summary_csv(rows)
 
 
 def parse_args() -> argparse.Namespace:
@@ -386,7 +416,7 @@ def parse_args() -> argparse.Namespace:
 	)
 	parser.add_argument(
 		"--experiment",
-		help="Run only one experiment name from config.json.",
+		help="Run only this experiment (all of its seeds) or this exact run name (x_seed7).",
 		default=None,
 	)
 	parser.add_argument(
@@ -403,7 +433,7 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument(
 		"--save-weights",
 		action="store_true",
-		help="Also write output/experiments/<name>/model.pt (~20 MB per experiment).",
+		help="Also write <output_dir>/<name>/model.pt (~20 MB per experiment).",
 	)
 	parser.add_argument(
 		"--print-cls-btr",
@@ -416,6 +446,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
 	args = parse_args()
 	base_config = load_config(args.config) if args.config else load_config()
+	# Before anything is written: runs, summary and combined figures all go here.
+	print(f"Writing results under: {output_dir_from_config(base_config)}")
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	print(f"Using device: {device}")
 
@@ -434,7 +466,10 @@ def main() -> None:
 			)
 		)
 
-	summary_path = write_experiment_summary([run.summary for run in runs])
+	summary_path = write_summary_csv(
+		[run.summary for run in runs],
+		order=experiment_names(base_config),
+	)
 	print(f"Experiment summary written to: {summary_path}")
 
 	if not args.no_plots:

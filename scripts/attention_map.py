@@ -1,6 +1,6 @@
 """Draw what [CLS] attends to, from a saved checkpoint. No retraining.
 
-    python scripts/attention_map.py s1_tabular_tokens_8col
+    python scripts/attention_map.py s1_08_8col_tokens
 
 Needs weights, so the run has to have been trained with --save-weights. The
 batch it scores is the test split of that run's own config, rebuilt from the
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dataset.preprocess_dataset import categorical_cardinalities, get_data_processed
 from dataset.product_dataset import create_data_loaders
-from metrics.run_results import run_dir
+from metrics.run_results import run_dir, set_experiments_dir
 from model.attention import cls_attention
 from model.checkpoint import load_checkpoint
 from plots.attention_map import plot_cls_attention
@@ -28,10 +28,16 @@ from plots.plot_theme import save
 
 def main() -> None:
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-	parser.add_argument("name", help="experiment name under output/experiments/")
+	parser.add_argument("name", help="experiment name under the batch folder")
+	parser.add_argument(
+		"--output-dir", default=None,
+		help="batch folder holding <name>/ (the config's output_dir; default output/experiments)",
+	)
 	parser.add_argument("--batches", type=int, default=4,
 	                    help="test batches to average over (default 4)")
 	args = parser.parse_args()
+	if args.output_dir:
+		set_experiments_dir(args.output_dir)
 
 	model, payload = load_checkpoint(args.name)
 	config = payload["config"]

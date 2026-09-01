@@ -44,20 +44,20 @@ OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output" / "eda"
 # shares the same tuple, which is what makes the rows non-independent.
 FILTER_TUPLE = ("filter_category", "filter_price_min", "filter_price_max", "filter_storage_type")
 
-# Columns that survive ``drop_columns`` in config.json and therefore reach the
-# model, either one-hot encoded or normalized.
-KEPT_FEATURES = frozenset(
+# CSV columns the base model reads (config/01_entrada.json), on top of the two
+# derived from title. The other seven that survive drop_columns (brand,
+# storage_type, country_of_origin, nutrition_score, net_weight_oz, the price
+# filters) showed no signal and enter only the *_12col ablation arms.
+KEPT_FEATURES = frozenset({"category", "allergens", "price"})
+ABLATION_ONLY = frozenset(
 	{
-		"category",
-		"storage_type",
 		"brand",
+		"storage_type",
 		"country_of_origin",
-		"allergens",
-		"price",
+		"nutrition_score",
+		"net_weight_oz",
 		"filter_price_min",
 		"filter_price_max",
-		"net_weight_oz",
-		"nutrition_score",
 	}
 )
 
@@ -340,26 +340,31 @@ def build_overview(rows: Sequence[Row]) -> list[OverviewEntry]:
 		OverviewEntry("category", "modelo", z("category")),
 		OverviewEntry("allergens", "modelo", z("allergens")),
 		OverviewEntry("price", "modelo", z("price", _quartile_key(rows, "price")), note="no lineal"),
+		# Sobreviven a drop_columns pero no entran al modelo base: solo al brazo 12col.
 		OverviewEntry(
 			"brand",
-			"modelo",
+			"sin_senal",
 			z("brand"),
 			repetition=contained_fraction(rows, "brand", "title"),
-			repetition_label="$\\subset$ title (descartada)",
+			repetition_label="$\\subset$ title (descartada) · solo ablación 12col",
 		),
-		OverviewEntry("country_of_origin", "modelo", z("country_of_origin")),
-		OverviewEntry("storage_type", "modelo", z("storage_type")),
+		OverviewEntry("country_of_origin", "sin_senal", z("country_of_origin"), note="solo ablación 12col"),
+		OverviewEntry("storage_type", "sin_senal", z("storage_type"), note="solo ablación 12col"),
 		OverviewEntry(
-			"net_weight_oz", "modelo", z("net_weight_oz", _quartile_key(rows, "net_weight_oz"))
-		),
-		OverviewEntry(
-			"nutrition_score", "modelo", z("nutrition_score", _quartile_key(rows, "nutrition_score"))
+			"net_weight_oz", "sin_senal", z("net_weight_oz", _quartile_key(rows, "net_weight_oz")),
+			note="solo ablación 12col",
 		),
 		OverviewEntry(
-			"filter_price_min", "modelo", z("filter_price_min", _quartile_key(rows, "filter_price_min"))
+			"nutrition_score", "sin_senal", z("nutrition_score", _quartile_key(rows, "nutrition_score")),
+			note="solo ablación 12col",
 		),
 		OverviewEntry(
-			"filter_price_max", "modelo", z("filter_price_max", _quartile_key(rows, "filter_price_max"))
+			"filter_price_min", "sin_senal", z("filter_price_min", _quartile_key(rows, "filter_price_min")),
+			note="solo ablación 12col",
+		),
+		OverviewEntry(
+			"filter_price_max", "sin_senal", z("filter_price_max", _quartile_key(rows, "filter_price_max")),
+			note="solo ablación 12col",
 		),
 		# Descartadas porque su informacion ya viaja en otra columna.
 		OverviewEntry(
@@ -456,21 +461,21 @@ def plot_csv_walkthrough(rows: Sequence[Row]) -> plt.Figure:
 		("timestamp", "sin_senal", "fuera — BTR plano mes a mes"),
 		("query_id", "meta", "no es feature — agrupa el split"),
 		("filter_category", "repetida", "fuera — = category en 10.000/10.000"),
-		("filter_price_min", "modelo", "queda — numerica"),
-		("filter_price_max", "modelo", "queda — numerica"),
+		("filter_price_min", "sin_senal", "sin señal — solo en la ablacion 12col"),
+		("filter_price_max", "sin_senal", "sin señal — solo en la ablacion 12col"),
 		("filter_storage_type", "repetida", "fuera — = storage_type en 10.000/10.000"),
 		("cart", "fuga", "fuera — bought=true $\\Rightarrow$ cart=true"),
 		("bought", "meta", "el target"),
-		("brand", "modelo", "queda — categorica"),
+		("brand", "sin_senal", "sin señal — solo en la ablacion 12col"),
 		("package_size", "repetida", "fuera — se lee dentro de title"),
 		("unit_of_measure", "repetida", "fuera — se lee dentro de package_size"),
-		("net_weight_oz", "modelo", "queda — numerica"),
+		("net_weight_oz", "sin_senal", "sin señal — solo en la ablacion 12col"),
 		("dimensions_in", "sin_senal", "fuera — sin relacion con bought"),
-		("storage_type", "modelo", "queda — categorica"),
+		("storage_type", "sin_senal", "sin señal — solo en la ablacion 12col"),
 		("ingredients", "sin_senal", "fuera — no suma sobre category+allergens"),
 		("allergens", "modelo", "queda — 'None' es categoria real, no un nulo"),
-		("nutrition_score", "modelo", "queda — numerica"),
-		("country_of_origin", "modelo", "queda — categorica"),
+		("nutrition_score", "sin_senal", "sin señal — solo en la ablacion 12col"),
+		("country_of_origin", "sin_senal", "sin señal — solo en la ablacion 12col"),
 	]
 
 	figure, axes = plt.subplots(figsize=(12.5, 0.34 * (len(spec) + 1) + 1.6))
@@ -535,6 +540,8 @@ def plot_repeated_columns(rows: Sequence[Row]) -> plt.Figure:
 	row = rows[0]  # the Cedar House pizza: every mechanism is visible in it
 
 	# (text, column, kept) — concatenating the texts reproduces title verbatim.
+	# brand leaves for lack of signal, not for redundancy: process_title_column
+	# strips the brand prefix out of product_name, so nothing else carries it.
 	segments = [
 		("Cedar House", "brand", False),
 		(" Steamable Pepperoni Pizza ", "product_name", True),
@@ -609,9 +616,12 @@ def plot_repeated_columns(rows: Sequence[Row]) -> plt.Figure:
 			chip_y = chip_rows[column]
 			if column == "package_size":
 				package_center = center
-			label = (
-				f"{column}\n(derivada, queda)" if kept else f"{column} = '{text.strip()}'\n(columna aparte, fuera)"
-			)
+			if column == "brand":
+				label = f"brand = '{text.strip()}'\n(fuera: sin señal)"
+			elif kept:
+				label = f"{column}\n(derivada, queda)"
+			else:
+				label = f"{column} = '{text.strip()}'\n(columna aparte, fuera)"
 			chip(center, chip_y, label, kept, fontsize=9)
 			axes.annotate(
 				"",
@@ -644,7 +654,12 @@ def plot_repeated_columns(rows: Sequence[Row]) -> plt.Figure:
 	):
 		y = 0.33
 		x0 = 0.16 + offset * 0.46
-		chip(x0, y, f"{kept_column} = '{row[kept_column]}'\n(queda)", True, fontsize=9.5)
+		kept = kept_column in KEPT_FEATURES
+		chip(
+			x0, y,
+			f"{kept_column} = '{row[kept_column]}'\n" + ("(queda)" if kept else "(sin señal: solo ablacion)"),
+			kept, fontsize=9.5,
+		)
 		axes.text(x0 + 0.115, y, "=", ha="center", va="center", fontsize=15, fontweight="bold")
 		chip(x0 + 0.25, y, f"{copy_column} = '{row[copy_column]}'\n(fuera)", False, fontsize=9.5)
 
@@ -1274,9 +1289,9 @@ def plot_within_query_constancy(rows: Sequence[Row]) -> plt.Figure:
 		4.2,
 		f"Las {len(rows_by_query(rows)):,} queries tienen exactamente\n"
 		f"1 tupla de filtros distinta ({len(rows_by_query(rows)):,} / {len(rows_by_query(rows)):,}).\n\n"
-		"Cuatro de las columnas 100% constantes\n"
-		"llegan al modelo: category, storage_type,\n"
-		"filter_price_min, filter_price_max.",
+		"De las columnas 100% constantes solo\n"
+		"category llega al modelo base; storage_type\n"
+		"y los filtros de precio, a la ablacion 12col.",
 		fontsize=9.5,
 		color=POSITIVE_COLOR,
 		va="center",

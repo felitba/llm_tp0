@@ -1,8 +1,11 @@
 """ROC curve calculated over model-score thresholds."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import roc_auc_score as sk_roc_auc_score
 
 from config.config import PROJECT_ROOT
 
@@ -37,8 +40,18 @@ def roc_curve(y_true: Sequence[int], y_scores: Sequence[float]) -> ThresholdCurv
 
 
 def roc_auc_score(y_true: Sequence[int], y_scores: Sequence[float]) -> float:
-	"""Return threshold-based ROC AUC without creating a plot."""
-	return roc_curve(y_true, y_scores).auc
+	"""ROC AUC, from sklearn. The single reported ROC number.
+
+	Delegated rather than integrated from ``roc_curve`` so the reported metric
+	is the reference implementation and needs no defending in the report. The
+	hand-built curve is still what gets drawn; its area now agrees with this
+	(see ``plots.threshold_curves.area_under_curve``).
+
+	Trapezoidal integration is correct in ROC space -- unlike PR space, linear
+	interpolation between ROC points is achievable (Davis & Goadrich 2006), so
+	the estimator was never the problem here; the sort order was.
+	"""
+	return float(sk_roc_auc_score(np.asarray(y_true, dtype=int), np.asarray(y_scores, dtype=float)))
 
 
 def plot_roc_auc(
@@ -49,7 +62,8 @@ def plot_roc_auc(
 	``y_true`` contains binary labels and ``y_scores`` contains the score or
 	probability used for thresholding.
 	"""
-	curve = roc_curve(y_true, y_scores)
+	# Legend shows the sklearn number, so figure and tables cannot disagree.
+	curve = replace(roc_curve(y_true, y_scores), auc=roc_auc_score(y_true, y_scores))
 	return plot_threshold_curve(
 		curve=curve,
 		x_label="False Positive Rate",
@@ -68,7 +82,10 @@ def plot_roc_auc_by_config(
 	Each entry is ``(config_name, y_true, y_scores)``. Curves are drawn from
 	best to worst AUC so the legend reads as a ranking.
 	"""
-	curves = [(name, roc_curve(y_true, y_scores)) for name, y_true, y_scores in results_by_config]
+	curves = [
+		(name, replace(roc_curve(y_true, y_scores), auc=roc_auc_score(y_true, y_scores)))
+		for name, y_true, y_scores in results_by_config
+	]
 	curves.sort(key=lambda item: item[1].auc, reverse=True)
 	return plot_combined_threshold_curves(
 		curves=curves,

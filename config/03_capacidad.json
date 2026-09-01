@@ -3,6 +3,7 @@
   "_comment": "PASO 3 - Cuanta capacidad conviene. Un factor por vez desde la base chica, que es lo que pide la consigna ('arquitectura base pequena ... luego ir aumentando la complejidad'), y NO un grid: un grid de 60+ celdas elegidas por el maximo de val_pr_auc es el maximo de 60 tiradas ruidosas sobre un solo split de validacion y no reproduce en test. n_heads usa {2,4,8} porque divide a 64, 96 y 128; con 6 heads las celdas de 64 y 128 ni siquiera corren (nn.MultiheadAttention exige d_model %% n_heads == 0). dim_feedforward se varia como RAZON de d_model (1x/2x/4x) para que las celdas signifiquen lo mismo a distinto ancho.",
   "_carry_forward": "Del paso 2: use_encoder y pooling ganadores, ademas de las columnas del paso 1.",
   "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/03_capacidad",
   "d_model": 96,
   "vocab_size": 50257,
   "n_heads": 4,

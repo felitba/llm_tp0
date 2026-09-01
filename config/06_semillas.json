@@ -3,6 +3,7 @@
   "_comment": "PASO 6 - Barras de error sobre el modelo final. Sin esto ningun gap de los pasos anteriores se puede defender contra 'eso no es ruido?': en s1_solo_title_tag el val_pr_auc oscilaba entre 0.633 y 0.696 entre epocas del MISMO modelo. Cambia solo la semilla de inicializacion; split_seed queda fijo en 42 para que las tres corridas vean exactamente la misma particion y la unica fuente de variacion sea el entrenamiento. Reporta media y rango, no el mejor de los tres.",
   "_carry_forward": "Del paso 5: la configuracion final completa.",
   "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/06_semillas",
   "d_model": 96,
   "vocab_size": 50257,
   "n_heads": 4,

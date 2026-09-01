@@ -3,6 +3,7 @@
   "_comment": "PASO 4 - Regularizacion y optimizacion, un factor por vez sobre la capacidad ganadora del paso 3. Es el material de la filmina de overfitting/underfitting que pide la consigna: cada brazo guarda su curva train-vs-val en run.json, asi que la conclusion se lee en las curvas y no solo en el numero de test.",
   "_carry_forward": "Del paso 3: d_model, n_heads, num_layers y dim_feedforward ganadores. Copialos al bloque base.",
   "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/04_regularizacion",
   "d_model": 96,
   "vocab_size": 50257,
   "n_heads": 4,

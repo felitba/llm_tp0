@@ -79,8 +79,21 @@ def calculate_threshold_curve(
 
 
 def area_under_curve(x_values: np.ndarray, y_values: np.ndarray) -> float:
-	"""Integrate a curve after sorting by the x-axis."""
-	order = np.argsort(x_values)
+	"""Integrate a curve after sorting by the x-axis, ties broken by y.
+
+	``np.lexsort`` and not ``np.argsort``: an ROC curve has vertical segments
+	(a run of consecutive positives raises TPR while FPR stays put), so several
+	points share an x. ``np.argsort`` defaults to an unstable quicksort, which
+	is free to scramble the y order inside such a run; the trapezoid terms that
+	cross into and out of the run then use the wrong heights and the area comes
+	out wrong -- up to 0.023 against sklearn on random inputs. Sorting by
+	(x, y) restores the curve's own order and matches sklearn to 1e-16.
+
+	The reported scalars come from sklearn regardless (see plots/roc_auc.py and
+	plots/pr_auc.py); this keeps the number printed in a figure legend equal to
+	the number in the tables.
+	"""
+	order = np.lexsort((y_values, x_values))
 	return float(np.trapezoid(y_values[order], x_values[order]))
 
 

@@ -25,7 +25,7 @@ from plots.pr_auc import plot_pr_auc, plot_pr_auc_by_config, positive_rate
 from plots.pr_auc_by_epoch import plot_pr_auc_by_epoch
 from plots.roc_auc import plot_roc_auc, plot_roc_auc_by_config
 from plots.train_vs_val_error import plot_training_progress
-from metrics.run_results import EXPERIMENTS_DIR, RunResults
+from metrics.run_results import RunResults, experiments_dir
 from plots.plot_theme import save
 
 
@@ -144,7 +144,7 @@ def plot_runs_combined(runs: Sequence[RunResults], suffix: str = "") -> list[Pat
 			(plot_pr_auc_by_config, f"pr_auc_all_configs{tail}.jpg"),
 		):
 			figure, _ = plot_curves(curves_input)
-			output_paths.append(save(figure, EXPERIMENTS_DIR / filename))
+			output_paths.append(save(figure, experiments_dir() / filename))
 
 	# The test curves say which one won; these say why, which is where capacity
 	# and overfitting can be told apart.
@@ -156,7 +156,7 @@ def plot_runs_combined(runs: Sequence[RunResults], suffix: str = "") -> list[Pat
 	):
 		drawn = plot_metric_by_epoch(runs, metric_key, y_label, title, subtitle, limits)
 		if drawn:
-			output_paths.append(save(drawn[0], EXPERIMENTS_DIR / filename))
+			output_paths.append(save(drawn[0], experiments_dir() / filename))
 
 	for plot_fn, filename in (
 		(plot_test_scores, f"test_scores_all_configs{tail}.jpg"),
@@ -166,7 +166,7 @@ def plot_runs_combined(runs: Sequence[RunResults], suffix: str = "") -> list[Pat
 	):
 		drawn = plot_fn(runs, subtitle=subtitle)
 		if drawn:
-			output_paths.append(save(drawn[0], EXPERIMENTS_DIR / filename))
+			output_paths.append(save(drawn[0], experiments_dir() / filename))
 	return output_paths
 
 

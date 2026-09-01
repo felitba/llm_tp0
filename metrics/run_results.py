@@ -28,8 +28,10 @@ import numpy as np
 from config.config import PROJECT_ROOT
 
 EXPERIMENTS_DIR = PROJECT_ROOT / "output" / "experiments"
+_experiments_dir = EXPERIMENTS_DIR
 RUN_FILE = "run.json"
 PREDICTIONS_FILE = "test_predictions.csv"
+EPOCH_PREDICTIONS_FILE = "epoch_predictions.npz"
 # Validation and train scores from the same selected checkpoint the test row
 # reports. Test alone answers "how good is it"; these two are what a reliability
 # diagram, a validation-set threshold sweep or a train-vs-test overfitting curve
@@ -66,6 +68,10 @@ class RunResults:
 	# over a set of impressions, and the query is that set, so this is what turns
 	# per-impression probabilities back into the quantity the assignment asks for.
 	query_ids: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=object))
+	# Per-epoch scores: "epochs" (E,), "val_probs" / "test_probs" (E, N) plus the
+	# matching "*_labels" and "*_row_ids" (N,). Empty for runs written before
+	# these were stored; see EPOCH_PREDICTIONS_FILE.
+	epoch_predictions: dict[str, np.ndarray] = field(default_factory=dict)
 	# Wall clock, so "this arm costs 20x for the same score" is a number and not
 	# an argument from sequence length.
 	duration_seconds: float = 0.0
@@ -86,8 +92,33 @@ class RunResults:
 		return len(self.labels) > 0 and len(np.unique(self.labels)) > 1
 
 
+def experiments_dir() -> Path:
+	"""The batch folder in use: output/experiments unless a config moved it."""
+	return _experiments_dir
+
+
+def set_experiments_dir(path: str | Path | None) -> Path:
+	"""Point every reader and writer at ``path`` (repo-relative or absolute).
+
+	``None`` restores the default. Call it once, right after loading the config
+	and before anything is saved or loaded.
+	"""
+	global _experiments_dir
+	if path is None:
+		_experiments_dir = EXPERIMENTS_DIR
+	else:
+		path = Path(path)
+		_experiments_dir = path if path.is_absolute() else PROJECT_ROOT / path
+	return _experiments_dir
+
+
+def output_dir_from_config(config: dict[str, Any]) -> Path:
+	"""Resolve a config's ``output_dir`` and make it the batch folder."""
+	return set_experiments_dir(config.get("output_dir"))
+
+
 def run_dir(name: str) -> Path:
-	return EXPERIMENTS_DIR / name
+	return experiments_dir() / name
 
 
 def save_run(results: RunResults) -> Path:
@@ -123,11 +154,15 @@ def save_run(results: RunResults) -> Path:
 		write_predictions(filename, labels, probs, results.split_row_ids.get(split_name))
 		written_splits[split_name] = filename
 
+	if results.epoch_predictions:
+		np.savez_compressed(directory / EPOCH_PREDICTIONS_FILE, **results.epoch_predictions)
+
 	payload = {
 		"name": results.name,
 		"created_at": results.created_at
 		or datetime.now(timezone.utc).isoformat(timespec="seconds"),
 		"config_file": results.config_file,
+		"epoch_predictions_file": EPOCH_PREDICTIONS_FILE if results.epoch_predictions else None,
 		"config": {
 			key: value
 			for key, value in results.config.items()
@@ -172,6 +207,11 @@ def load_run(name: str) -> RunResults:
 			split_labels, split_probs, split_ids, _ = _load_predictions(path)
 			split_predictions[split_name] = (split_labels, split_probs)
 			split_row_ids[split_name] = split_ids
+	epoch_predictions: dict[str, np.ndarray] = {}
+	epoch_path = directory / (payload.get("epoch_predictions_file") or EPOCH_PREDICTIONS_FILE)
+	if epoch_path.exists():
+		with np.load(epoch_path, allow_pickle=False) as data:
+			epoch_predictions = {key: data[key] for key in data.files}
 	return RunResults(
 		name=payload.get("name", name),
 		config=payload.get("config", {}),
@@ -188,15 +228,47 @@ def load_run(name: str) -> RunResults:
 		split_row_ids=split_row_ids,
 		row_ids=row_ids,
 		query_ids=query_ids,
+		epoch_predictions=epoch_predictions,
 		duration_seconds=float(payload.get("duration_seconds", 0.0)),
 	)
 
 
+def write_summary_csv(rows: list[dict[str, Any]], order: list[str] | None = None) -> Path:
+	"""One row per experiment at <output_dir>/summary.csv, merged by name.
+
+	Rows already in the file survive unless a new row has the same name, so
+	``main.py --experiment X`` refreshes X without wiping the rest of the batch.
+	``order`` (the config's experiment names) fixes the row order; names not in
+	it go last.
+	"""
+	experiments_dir().mkdir(parents=True, exist_ok=True)
+	output_path = experiments_dir() / "summary.csv"
+	merged: dict[str, dict[str, Any]] = {}
+	if output_path.exists():
+		with output_path.open(encoding="utf-8") as file:
+			for existing in csv.DictReader(file):
+				merged[existing["name"]] = dict(existing)
+	for row in rows:
+		merged[str(row["name"])] = dict(row)
+	ranked = sorted(
+		merged.values(),
+		key=lambda row: ((order or []).index(row["name"]) if row["name"] in (order or []) else len(order or [])),
+	)
+	headers: list[str] = []
+	for row in ranked:
+		headers += [key for key in row if key not in headers]
+	with output_path.open("w", encoding="utf-8") as file:
+		file.write(",".join(headers) + "\n")
+		for row in ranked:
+			file.write(",".join(str(row.get(header, "")) for header in headers) + "\n")
+	return output_path
+
+
 def saved_run_names() -> list[str]:
 	"""Every experiment directory that holds a run.json, oldest run first."""
-	if not EXPERIMENTS_DIR.exists():
+	if not experiments_dir().exists():
 		return []
-	directories = [path for path in EXPERIMENTS_DIR.iterdir() if (path / RUN_FILE).exists()]
+	directories = [path for path in experiments_dir().iterdir() if (path / RUN_FILE).exists()]
 	directories.sort(key=lambda path: (path / RUN_FILE).stat().st_mtime)
 	return [path.name for path in directories]
 

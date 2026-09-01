@@ -11,23 +11,33 @@ import json
 from pathlib import Path
 
 from config.config import resolve_path
+from config.experiments import experiment_names
 from plots.experiment_plots import plot_run, plot_runs_combined
-from metrics.run_results import load_runs, saved_run_names
+from metrics.run_results import (
+	experiments_dir, load_runs, output_dir_from_config, saved_run_names, set_experiments_dir,
+)
 
 
 def names_from_config(config_file: str | Path) -> list[str]:
-	"""The experiment names one config file declares, in declaration order."""
+	"""The experiment names one config file declares, in declaration order.
+
+	Also points the reader at that config's ``output_dir``, so the runs are
+	looked up where main.py wrote them.
+	"""
 	with resolve_path(config_file).open(encoding="utf-8") as file:
 		config = json.load(file)
-	return [str(experiment.get("name")) for experiment in config.get("experiments", [])]
+	output_dir_from_config(config)
+	return experiment_names(config)
 
 
 def selected_names(args: argparse.Namespace) -> list[str]:
 	"""Resolve which saved runs to redraw, keeping the caller's order."""
-	if args.names:
-		requested = args.names
-	elif args.config:
+	if args.config:
 		requested = names_from_config(args.config)
+		if args.names:
+			requested = args.names
+	elif args.names:
+		requested = args.names
 	else:
 		return saved_run_names()
 
@@ -59,6 +69,11 @@ def parse_args() -> argparse.Namespace:
 		default="",
 	)
 	parser.add_argument(
+		"--output-dir",
+		help="Batch folder to read and write (default: the config's output_dir, else output/experiments).",
+		default=None,
+	)
+	parser.add_argument(
 		"--no-combined",
 		action="store_true",
 		help="Skip the all-configs ROC/PR figures.",
@@ -68,9 +83,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
 	args = parse_args()
-	runs = load_runs(selected_names(args))
+	if args.output_dir:
+		set_experiments_dir(args.output_dir)
+	names = selected_names(args)
+	if args.output_dir:
+		set_experiments_dir(args.output_dir)  # an explicit flag beats the config's key
+	runs = load_runs(names)
 	if not runs:
-		raise SystemExit("Nothing to replot: no run.json under output/experiments/.")
+		raise SystemExit(f"Nothing to replot: no run.json under {experiments_dir()}.")
 
 	for run in runs:
 		for path in plot_run(run):
