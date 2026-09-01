@@ -1,0 +1,92 @@
+{
+  "_step": "05",
+  "_comment": "PASO 5 - Alternativas de modulo, las ablaciones baratas. s5_gelu corre hoy tal cual. s5_norm_first_pre REQUIERE que EncodingBlock pase norm_first a nn.TransformerEncoderLayer (hoy no lo lee). s5_head_linear REQUIERE hacer configurable la profundidad de la cabeza (hoy es un MLP fijo); es el linear probe, y si alcanza demuestra que el encoder dejo la representacion linealmente separable, que es una afirmacion mas fuerte que 'da bien'. Opcional: si el tiempo aprieta, este paso va al anexo.",
+  "_carry_forward": "Del paso 4: dropout, weight_decay y learning_rate ganadores, ademas de todo lo anterior.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag",
+    "brand",
+    "storage_type",
+    "country_of_origin"
+  ],
+  "numeric_columns": [
+    "price",
+    "nutrition_score",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s5_base",
+      "_comment": "Referencia con la config ganadora del paso 4.",
+      "overrides": {}
+    },
+    {
+      "name": "s5_gelu",
+      "_comment": "GELU en vez de ReLU en el FFN. Corre sin tocar codigo.",
+      "overrides": {
+        "activation": "gelu"
+      }
+    },
+    {
+      "name": "s5_norm_first_pre",
+      "_comment": "Pre-LN en vez de post-LN. BLOQUEADO: falta el hook en EncodingBlock.",
+      "overrides": {
+        "norm_first": true
+      }
+    },
+    {
+      "name": "s5_head_linear",
+      "_comment": "Linear probe: cabeza de una sola capa. BLOQUEADO: falta hacerla configurable.",
+      "overrides": {
+        "head_layers": 1
+      }
+    }
+  ]
+}

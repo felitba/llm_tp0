@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import time
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from dataset.product_dataset import ProductDataLoaders, create_data_loaders
 from plots.experiment_plots import plot_run, plot_runs_combined
 from plots.pr_auc import pr_auc_score
 from plots.roc_auc import roc_auc_score
+from metrics.error_analysis import build_error_analysis, error_summary, write_error_analysis
 from metrics.run_results import EXPERIMENTS_DIR, RunResults, save_run
 from model.checkpoint import save_checkpoint
 from model.encoder_only_model import EncoderOnlyModel
@@ -71,6 +73,7 @@ def run_epoch(
 	total_loss = 0.0
 	all_logits = []
 	all_labels = []
+	all_row_ids = []
 	cls_rows = []
 
 	for batch in loader:
@@ -114,6 +117,7 @@ def run_epoch(
 		total_loss += loss.item() * labels.size(0)
 		all_logits.append(logits.detach().cpu())
 		all_labels.append(labels.detach().cpu())
+		all_row_ids.append(batch["row_id"].detach().cpu())
 
 	if cls_output_path is not None and cls_rows:
 		cls_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +135,7 @@ def run_epoch(
 
 	return {
 		"loss": total_loss / len(loader.dataset),
+		"row_ids": torch.cat(all_row_ids).numpy().reshape(-1),
 		"roc_auc": roc_auc_score(labels_np.astype(int), probs) if has_both_classes else float("nan"),
 		"pr_auc": pr_auc_score(labels_np.astype(int), probs) if has_both_classes else float("nan"),
 		"labels": labels_np,
@@ -149,6 +154,7 @@ def train_one_experiment(
 	save_weights: bool = False,
 ) -> RunResults:
 	"""Train one configured experiment and return everything it produced."""
+	started_at = time.perf_counter()
 	set_seed(int(config.get("seed", config.get("split_seed", 42))))
 	splits = get_data_processed(config)
 	loaders: ProductDataLoaders = create_data_loaders(splits, config)
@@ -252,6 +258,47 @@ def train_one_experiment(
 		print_cls_btr=print_cls_btr, split_name="test",
 		cls_output_path=cls_output_path if print_cls_btr else None, epoch=completed_epochs,
 	)
+	# Score train and validation with the same selected weights the test row uses.
+	# Only the scores make a reliability diagram or a validation threshold sweep
+	# possible later, and a finished run cannot produce them after the fact.
+	split_predictions = {
+		"test": (
+			np.asarray(test_metrics["labels"], dtype=int),
+			np.asarray(test_metrics["probs"], dtype=float),
+		)
+	}
+	split_row_ids = {"test": np.asarray(test_metrics["row_ids"], dtype=int)}
+	for split_name, loader in (("train", loaders.train), ("validation", loaders.validation)):
+		split_metrics = run_epoch(model, loader, criterion, device)
+		split_predictions[split_name] = (
+			np.asarray(split_metrics["labels"], dtype=int),
+			np.asarray(split_metrics["probs"], dtype=float),
+		)
+		split_row_ids[split_name] = np.asarray(split_metrics["row_ids"], dtype=int)
+
+	# The test rows as a person can read them, worst prediction first. This is the
+	# only artifact that answers "what kind of product does it keep getting wrong",
+	# which is a question about rows and cannot be read off an AUC.
+	test_row_ids = split_row_ids["test"]
+	errors = build_error_analysis(
+		splits["test"], test_row_ids,
+		test_metrics["labels"], test_metrics["probs"],
+	)
+	print(f"[{name}] Error analysis written to: {write_error_analysis(EXPERIMENTS_DIR / name, errors)}")
+	for column in ("title_tag", "category"):
+		summary = error_summary(errors, column)
+		if not summary.empty:
+			worst = summary.head(3)
+			print(f"[{name}]   peor error medio por {column}: " + ", ".join(
+				f"{index} ({row.error_medio:.3f}, n={int(row.filas)})"
+				for index, row in worst.iterrows()
+			))
+	query_ids = (
+		splits["test"].loc[test_row_ids, "query_id"].to_numpy()
+		if "query_id" in splits["test"].columns
+		else np.empty(0, dtype=object)
+	)
+
 	if print_cls_btr:
 		print(f"CLS comparison written to: {cls_output_path}")
 	print(
@@ -292,6 +339,11 @@ def train_one_experiment(
 		labels=np.asarray(test_metrics["labels"], dtype=int),
 		probs=np.asarray(test_metrics["probs"], dtype=float),
 		config_file=config_file,
+		split_predictions=split_predictions,
+		split_row_ids=split_row_ids,
+		row_ids=test_row_ids,
+		query_ids=query_ids,
+		duration_seconds=time.perf_counter() - started_at,
 	)
 	# Save before plotting: the numbers are the expensive part, the figures are
 	# a pure function of them and replot.py can rebuild those at any time.

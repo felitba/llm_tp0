@@ -30,6 +30,16 @@ from config.config import PROJECT_ROOT
 EXPERIMENTS_DIR = PROJECT_ROOT / "output" / "experiments"
 RUN_FILE = "run.json"
 PREDICTIONS_FILE = "test_predictions.csv"
+# Validation and train scores from the same selected checkpoint the test row
+# reports. Test alone answers "how good is it"; these two are what a reliability
+# diagram, a validation-set threshold sweep or a train-vs-test overfitting curve
+# need, and none of them can be recovered from a finished run without the scores.
+# Two extra inference passes at the end of a run, which is cheap next to training.
+SPLIT_PREDICTION_FILES = {
+	"train": "train_predictions.csv",
+	"validation": "validation_predictions.csv",
+	"test": PREDICTIONS_FILE,
+}
 
 # The experiment list is the same in every run.json of a batch and is by far the
 # bulkiest key; the merged config already carries what this run actually used.
@@ -45,6 +55,20 @@ class RunResults:
 	history: dict[str, list[float]] = field(default_factory=dict)
 	epoch_metrics: list[dict[str, float]] = field(default_factory=list)
 	selection: dict[str, Any] = field(default_factory=dict)
+	# split name -> (labels, probs), for every split that was scored.
+	split_predictions: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
+	# split name -> dataframe index of each scored row, aligned with the arrays
+	# above. Needed to join a score back to the product it belongs to, and to
+	# group test scores by query_id, which is how the BTR is actually defined.
+	split_row_ids: dict[str, np.ndarray] = field(default_factory=dict)
+	row_ids: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
+	# The query each test impression belonged to. The BTR is defined as a rate
+	# over a set of impressions, and the query is that set, so this is what turns
+	# per-impression probabilities back into the quantity the assignment asks for.
+	query_ids: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=object))
+	# Wall clock, so "this arm costs 20x for the same score" is a number and not
+	# an argument from sequence length.
+	duration_seconds: float = 0.0
 	test: dict[str, float] = field(default_factory=dict)
 	summary: dict[str, Any] = field(default_factory=dict)
 	labels: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
@@ -71,12 +95,33 @@ def save_run(results: RunResults) -> Path:
 	directory = run_dir(results.name)
 	directory.mkdir(parents=True, exist_ok=True)
 
-	labels = np.asarray(results.labels, dtype=int).reshape(-1)
-	probs = np.asarray(results.probs, dtype=float).reshape(-1)
-	with (directory / PREDICTIONS_FILE).open("w", newline="", encoding="utf-8") as file:
-		writer = csv.writer(file)
-		writer.writerow(["label", "probability"])
-		writer.writerows(zip(labels.tolist(), probs.tolist()))
+	def write_predictions(
+		filename: str, labels: np.ndarray, probs: np.ndarray,
+		ids: np.ndarray | None, queries: np.ndarray | None = None,
+	) -> None:
+		labels = np.asarray(labels, dtype=int).reshape(-1)
+		probs = np.asarray(probs, dtype=float).reshape(-1)
+		ids = np.asarray(ids).reshape(-1) if ids is not None and len(ids) else None
+		queries = np.asarray(queries).reshape(-1) if queries is not None and len(queries) else None
+		header = ["label", "probability"]
+		columns = [labels.tolist(), probs.tolist()]
+		if ids is not None:
+			header.insert(0, "row_id"); columns.insert(0, ids.tolist())
+		if queries is not None:
+			header.append("query_id"); columns.append(queries.tolist())
+		with (directory / filename).open("w", newline="", encoding="utf-8") as file:
+			writer = csv.writer(file)
+			writer.writerow(header)
+			writer.writerows(zip(*columns))
+
+	write_predictions(
+		PREDICTIONS_FILE, results.labels, results.probs, results.row_ids, results.query_ids
+	)
+	written_splits = {}
+	for split_name, (labels, probs) in results.split_predictions.items():
+		filename = SPLIT_PREDICTION_FILES.get(split_name, f"{split_name}_predictions.csv")
+		write_predictions(filename, labels, probs, results.split_row_ids.get(split_name))
+		written_splits[split_name] = filename
 
 	payload = {
 		"name": results.name,
@@ -96,6 +141,8 @@ def save_run(results: RunResults) -> Path:
 		"test": {key: float(value) for key, value in results.test.items()},
 		"summary": results.summary,
 		"predictions_file": PREDICTIONS_FILE,
+		"split_prediction_files": written_splits,
+		"duration_seconds": float(results.duration_seconds),
 	}
 	run_path = directory / RUN_FILE
 	with run_path.open("w", encoding="utf-8") as file:
@@ -114,7 +161,17 @@ def load_run(name: str) -> RunResults:
 	with run_path.open(encoding="utf-8") as file:
 		payload = json.load(file)
 
-	labels, probs = _load_predictions(directory / payload.get("predictions_file", PREDICTIONS_FILE))
+	labels, probs, row_ids, query_ids = _load_predictions(
+		directory / payload.get("predictions_file", PREDICTIONS_FILE)
+	)
+	split_predictions = {}
+	split_row_ids = {}
+	for split_name, filename in (payload.get("split_prediction_files") or {}).items():
+		path = directory / filename
+		if path.exists():
+			split_labels, split_probs, split_ids, _ = _load_predictions(path)
+			split_predictions[split_name] = (split_labels, split_probs)
+			split_row_ids[split_name] = split_ids
 	return RunResults(
 		name=payload.get("name", name),
 		config=payload.get("config", {}),
@@ -127,6 +184,11 @@ def load_run(name: str) -> RunResults:
 		probs=probs,
 		config_file=payload.get("config_file"),
 		created_at=payload.get("created_at", ""),
+		split_predictions=split_predictions,
+		split_row_ids=split_row_ids,
+		row_ids=row_ids,
+		query_ids=query_ids,
+		duration_seconds=float(payload.get("duration_seconds", 0.0)),
 	)
 
 
@@ -144,16 +206,31 @@ def load_runs(names: list[str] | None = None) -> list[RunResults]:
 	return [load_run(name) for name in (names if names is not None else saved_run_names())]
 
 
-def _load_predictions(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_predictions(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+	"""labels, probs, row ids and query ids. The last two come back empty for
+	runs written before those columns existed."""
+	empty = (np.empty(0, dtype=int), np.empty(0, dtype=float),
+	         np.empty(0, dtype=int), np.empty(0, dtype=object))
 	if not path.exists():
-		return np.empty(0, dtype=int), np.empty(0, dtype=float)
+		return empty
 	labels: list[int] = []
 	probs: list[float] = []
+	ids: list[int] = []
+	queries: list[str] = []
 	with path.open(encoding="utf-8") as file:
 		for row in csv.DictReader(file):
 			labels.append(int(float(row["label"])))
 			probs.append(float(row["probability"]))
-	return np.asarray(labels, dtype=int), np.asarray(probs, dtype=float)
+			if row.get("row_id") is not None:
+				ids.append(int(float(row["row_id"])))
+			if row.get("query_id") is not None:
+				queries.append(row["query_id"])
+	return (
+		np.asarray(labels, dtype=int),
+		np.asarray(probs, dtype=float),
+		np.asarray(ids, dtype=int),
+		np.asarray(queries, dtype=object),
+	)
 
 
 def _json_safe(value: Any) -> Any:

@@ -1,0 +1,143 @@
+{
+  "_step": "01",
+  "_comment": "PASO 1 - Que lee el encoder, y en que forma. Dos preguntas en la misma tabla: cuantas columnas (1 -> 2 -> 8 -> 12) y, a un mismo conjunto de columnas, si las TABULARES entran como un feature token cada una o serializadas al stream de texto. OJO: product_name es texto por subwords en TODOS los brazos; 'tabular_tokens' nunca quiere decir 'sin tokenizador de texto', y '8col'/'12col' es cuantas columnas lee, no cuantos tokens hace. Arquitectura chica y fija (d_model 96 < 100, 2 capas) como sugiere la consigna, para que el costo de computo no limite. Corre: python main.py --config config/01_entrada.json",
+  "_carry_forward": "Nada: este es el punto de partida. El ganador define text_column / numeric_columns / categorical_columns / max_title_len de TODOS los pasos siguientes.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag",
+    "brand",
+    "storage_type",
+    "country_of_origin"
+  ],
+  "numeric_columns": [
+    "price",
+    "nutrition_score",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s1_solo_title_tag",
+      "_comment": "El piso. max_title_len 0 saca el tokenizador de texto entero: [CLS] + title_tag = 2 posiciones. Deberia reproducir el baseline de groupby(title_tag) (test PR-AUC 0.679); si queda muy por debajo, el problema es el setup de entrenamiento, no las features.",
+      "overrides": {
+        "categorical_columns": [
+          "title_tag"
+        ],
+        "numeric_columns": [],
+        "max_title_len": 0
+      }
+    },
+    {
+      "name": "s1_title_tag_product_name",
+      "_comment": "Suma los 10 subwords de product_name y nada mas: 12 posiciones. Contra s1_solo_title_tag aisla lo que aporta el tokenizador de texto, sin columnas tabulares en el medio.",
+      "overrides": {
+        "categorical_columns": [
+          "title_tag"
+        ],
+        "numeric_columns": [],
+        "max_title_len": 10
+      }
+    },
+    {
+      "name": "s1_tabular_tokens_8col",
+      "_comment": "Control FT-Transformer sobre 8 columnas: [CLS] + 10 texto + 2 numericas + 5 categoricas = 18 posiciones.",
+      "overrides": {
+        "categorical_columns": [
+          "category",
+          "allergens",
+          "title_tag",
+          "brand",
+          "storage_type"
+        ],
+        "numeric_columns": [
+          "price",
+          "nutrition_score"
+        ]
+      }
+    },
+    {
+      "name": "s1_all_text_8col",
+      "_comment": "Las MISMAS 8 columnas serializadas como 'nombre: valor | nombre: valor', sin tokens numericos ni categoricos. Contra s1_tabular_tokens_8col la unica diferencia es la representacion. Fila mas larga: 60 subwords.",
+      "overrides": {
+        "text_column": [
+          "product_name",
+          "brand",
+          "category",
+          "storage_type",
+          "allergens",
+          "title_tag",
+          "price",
+          "nutrition_score"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [],
+        "max_title_len": 64
+      }
+    },
+    {
+      "name": "s1_tabular_tokens_12col",
+      "_comment": "12 columnas como feature tokens: 22 posiciones. Suma country_of_origin, filter_price_min, filter_price_max y net_weight_oz. Las numericas llegan z-scoreadas con estadisticos de train (normalize_splits).",
+      "overrides": {}
+    },
+    {
+      "name": "s1_all_text_12col",
+      "_comment": "Las mismas 12 columnas serializadas: 101 posiciones. text_column 'all' resuelve exactamente a esas 12 porque drop_columns saca ingredients, asi que el par esta apareado. Fila mas larga: 98 subwords.",
+      "overrides": {
+        "text_column": "all",
+        "text_exclude_columns": [
+          "bought",
+          "query_id"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [],
+        "max_title_len": 100
+      }
+    }
+  ]
+}

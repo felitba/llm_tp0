@@ -163,7 +163,18 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
 
     # splits = split_dataset_by_bought_true(df, config_data)
     splits = split_dataset(df, config_data)
+    # Keep the pre-scaling values around for error analysis. A z-scored price of
+    # -0.99 is the right input for the numeric tokenizer and the wrong thing to
+    # read when eyeballing which products the model gets wrong, and the scaling
+    # is not invertible from the split alone.
+    scaled_columns = config_columns("normalize_columns", config_data)
+    raw_numeric = {
+        name: split[[c for c in scaled_columns if c in split.columns]].copy()
+        for name, split in splits.items()
+    }
     splits = normalize_splits(splits, config_data)
+    for name, split in splits.items():
+        split.attrs["raw_numeric"] = raw_numeric[name]
     splits = encode_categorical_ids(splits, config_data)
     for split in splits.values():
         # text_column is the one to read; text_columns is what went into it, which

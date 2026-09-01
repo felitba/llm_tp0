@@ -1,0 +1,90 @@
+{
+  "_step": "02",
+  "_comment": "PASO 2 - Se gana algo con la atencion? Saca el stack de encoder dejando TODO lo demas igual: mismo tokenizador, misma cabeza, mismos splits, misma semilla. Son 149.568 parametros (3% del modelo) pero el 100% del mezclado entre columnas, asi que no es una carrera de capacidad. Sin encoder, [CLS] es un vector constante para las 10.000 filas y el modelo predeciria una constante: por eso el brazo sin encoder lee la fila con mean-pool enmascarado sobre los tokens reales. El tercer brazo separa 'saco la atencion' de 'cambio el readout'. REQUIERE las claves use_encoder y pooling en el modelo (todavia no implementadas).",
+  "_carry_forward": "Del paso 1: text_column, numeric_columns, categorical_columns y max_title_len del brazo ganador. Copialos al bloque base de ESTE archivo antes de correr.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag",
+    "brand",
+    "storage_type",
+    "country_of_origin"
+  ],
+  "numeric_columns": [
+    "price",
+    "nutrition_score",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s2_con_encoder_cls",
+      "_comment": "El modelo tal cual: encoder + readout por [CLS]. Es el mismo brazo ganador del paso 1, repetido aca para que las comparaciones de abajo se lean contra una corrida de ESTE archivo.",
+      "overrides": {
+        "use_encoder": true,
+        "pooling": "cls"
+      }
+    },
+    {
+      "name": "s2_con_encoder_meanpool",
+      "_comment": "Encoder, pero la cabeza lee el promedio de los tokens de salida en vez de [CLS]. Contra s2_con_encoder_cls responde la alternativa de pooling que la filmina F15 tiene pendiente.",
+      "overrides": {
+        "use_encoder": true,
+        "pooling": "mean"
+      }
+    },
+    {
+      "name": "s2_sin_encoder_meanpool",
+      "_comment": "Sin atencion: tokenizador -> mean-pool -> misma cabeza MLP. Si empata con s2_con_encoder_meanpool, el merito es de los embeddings y no de la atencion. Resultado negativo pero presentable: es el 'donde lo sacaron / donde no les sirvio' que pidio la profesora.",
+      "overrides": {
+        "use_encoder": false,
+        "pooling": "mean"
+      }
+    }
+  ]
+}

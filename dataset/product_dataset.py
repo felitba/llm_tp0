@@ -29,11 +29,16 @@ class ProductDataset(Dataset):
 		categorical: np.ndarray,
 		title_ids: np.ndarray,
 		labels: np.ndarray,
+		row_ids: np.ndarray,
 	) -> None:
 		self.numeric = torch.tensor(numeric, dtype=torch.float32)
 		self.categorical = torch.tensor(categorical, dtype=torch.long)
 		self.title_ids = torch.tensor(title_ids, dtype=torch.long)
 		self.labels = torch.tensor(labels, dtype=torch.float32).unsqueeze(-1)
+		# The dataframe index of each row, so a prediction can be joined back to
+		# the product it scored. Required, not optional: the train loader shuffles,
+		# so position in the output is not position in the split for that split.
+		self.row_ids = torch.tensor(row_ids, dtype=torch.long)
 
 	def __len__(self) -> int:
 		return len(self.labels)
@@ -44,6 +49,7 @@ class ProductDataset(Dataset):
 			"categorical": self.categorical[idx],
 			"title_ids": self.title_ids[idx],
 			"label": self.labels[idx],
+			"row_id": self.row_ids[idx],
 		}
 
 
@@ -120,7 +126,10 @@ def dataframe_to_product_dataset(
 		.astype(np.float32)
 		.to_numpy()
 	)
-	return ProductDataset(numeric_values, categorical, title_ids, labels)
+	return ProductDataset(
+		numeric_values, categorical, title_ids, labels,
+		np.asarray(split.index, dtype=np.int64),
+	)
 
 
 def encode_text(texts: pd.Series, max_len: int, vocab_size: int) -> np.ndarray:

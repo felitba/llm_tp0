@@ -198,10 +198,18 @@ class FeatureTokenizer(nn.Module):
         self.cls_token = nn.Parameter(
             uniform_init(torch.empty(1, 1, self.d_model), self.d_model)
         )
-        self.text_tokenizer = TextTokenizer(
-            vocab_size=int(config_data.get("vocab_size")),
-            d_model=self.d_model,
-            max_len=self.max_title_len,
+        # max_title_len 0 is how an ablation says "no text at all": there is no
+        # empty value for text_column, since build_text_column needs at least one
+        # column to serialize. None here rather than a zero-length tokenizer
+        # because PositionalEncoding has no meaningful 0-position table.
+        self.text_tokenizer = (
+            TextTokenizer(
+                vocab_size=int(config_data.get("vocab_size")),
+                d_model=self.d_model,
+                max_len=self.max_title_len,
+            )
+            if self.max_title_len > 0
+            else None
         )
         self.numeric_tokenizer = NumericTokenizer(len(self.numeric_columns), self.d_model)
         # Rebuilt in config order so the tokenizer's column order matches the order
@@ -250,10 +258,18 @@ class FeatureTokenizer(nn.Module):
         """
         batch_size = numeric.shape[0]
 
+        # Same empty case as CategoricalTokenizer: cat wants the (batch, 0, d_model)
+        # slice, so a text-free ablation contributes no positions at all.
+        text_tokens = (
+            self.text_tokenizer(title_ids)
+            if self.text_tokenizer is not None
+            else self.cls_token.new_zeros((batch_size, 0, self.d_model))
+        )
+
         tokens = torch.cat(
             [
                 self.cls_token.expand(batch_size, -1, -1),
-                self.text_tokenizer(title_ids),
+                text_tokens,
                 self.numeric_tokenizer(numeric),
                 self.categorical_tokenizer(categorical),
             ],

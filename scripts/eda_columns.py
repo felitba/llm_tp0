@@ -26,7 +26,16 @@ import matplotlib.pyplot as plt
 
 # `python scripts/eda_columns.py` puts scripts/ on the path, not the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from plots.plot_theme import ACCENT, MUTED, NEG, POS, apply_theme, legend_top_left  # noqa: E402
+from plots.plot_theme import (  # noqa: E402
+	ACCENT,
+	BASELINE,
+	MUTED,
+	NEG,
+	ORANGE,
+	POS,
+	apply_theme,
+	legend_top_left,
+)
 
 DATASET = Path(__file__).resolve().parent.parent / "dataset" / "supermarket_products.csv"
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output" / "eda"
@@ -244,6 +253,514 @@ def identical_fraction(rows: Sequence[Row], left: str, right: str) -> float:
 def contained_fraction(rows: Sequence[Row], needle: str, haystack: str) -> float:
 	matches = sum(1 for row in rows if row[needle].strip().lower() in row[haystack].strip().lower())
 	return matches / len(rows)
+
+
+def _quartile_key(
+	rows: Sequence[Row], column: str, extract: Callable[[Row], float] | None = None
+) -> Callable[[Row], str]:
+	"""Key that buckets a numeric column into marginal quartiles, for chi_square_signal."""
+	get = extract or (lambda row: float(row[column]))
+	ordered = sorted(get(row) for row in rows)
+	cuts = [ordered[int(len(ordered) * fraction)] for fraction in (0.25, 0.5, 0.75)]
+
+	def key(row: Row) -> str:
+		value = get(row)
+		if value <= cuts[0]:
+			return "Q1"
+		if value <= cuts[1]:
+			return "Q2"
+		if value <= cuts[2]:
+			return "Q3"
+		return "Q4"
+
+	return key
+
+
+def _volume(row: Row) -> float:
+	"""dimensions_in as a single number: the product of its three measures."""
+	numbers = [float(number) for number in re.findall(r"\d+(?:\.\d+)?", row["dimensions_in"])]
+	return numbers[0] * numbers[1] * numbers[2]
+
+
+def _description_phrase(row: Row) -> str:
+	"""The closing sentence of the description, which encodes the popularity claim."""
+	sentences = [part for part in row["description"].strip().rstrip(".").split(". ") if part]
+	return sentences[-1]
+
+
+def description_tier_agreement(rows: Sequence[Row]) -> float:
+	"""Rows whose description closing phrase lands on the same tier as the title tag.
+
+	Each phrase is mapped to its majority tier first, so this measures how far the
+	description is a second copy of the title's ranking signal.
+	"""
+	tiers_by_phrase: dict[str, Counter] = defaultdict(Counter)
+	for row in rows:
+		tiers_by_phrase[_description_phrase(row)][row.tier] += 1
+	majority = {phrase: counts.most_common(1)[0][0] for phrase, counts in tiers_by_phrase.items()}
+	return sum(1 for row in rows if majority[_description_phrase(row)] == row.tier) / len(rows)
+
+
+@dataclass(frozen=True)
+class OverviewEntry:
+	"""One row of the all-columns overview chart."""
+
+	column: str
+	group: str  # "modelo" | "repetida" | "fuga" | "sin_senal" | "meta"
+	z_score: float | None
+	repetition: float | None = None
+	repetition_label: str = ""
+	note: str = ""
+
+
+OVERVIEW_GROUPS = {
+	"modelo": ("Llega al modelo", POS),
+	"repetida": ("Descartada: repite otra columna", ORANGE),
+	"fuga": ("Descartada: fuga del target", NEG),
+	"sin_senal": ("Descartada: sin señal", MUTED),
+	"meta": ("Target / agrupa el split", BASELINE),
+}
+
+
+def build_overview(rows: Sequence[Row]) -> list[OverviewEntry]:
+	"""One entry per CSV column (plus the two derived from title), decision included.
+
+	The decision column mirrors drop_columns in config/01..06: what has no entry
+	there reaches the model. Repetition fractions are measured on the data, not
+	asserted: identical values, literal containment, or majority-tier agreement.
+	"""
+
+	def z(column: str, key: Callable[[Row], str] | None = None) -> float:
+		return chi_square_signal(rows, column, key).z_score
+
+	return [
+		# Sobreviven a drop_columns (title_tag y product_name nacen de title).
+		OverviewEntry("title_tag *", "modelo", z("title_tag", lambda row: row.tag)),
+		OverviewEntry("product_name *", "modelo", None, note="texto al tokenizador"),
+		OverviewEntry("category", "modelo", z("category")),
+		OverviewEntry("allergens", "modelo", z("allergens")),
+		OverviewEntry("price", "modelo", z("price", _quartile_key(rows, "price")), note="no lineal"),
+		OverviewEntry(
+			"brand",
+			"modelo",
+			z("brand"),
+			repetition=contained_fraction(rows, "brand", "title"),
+			repetition_label="$\\subset$ title (descartada)",
+		),
+		OverviewEntry("country_of_origin", "modelo", z("country_of_origin")),
+		OverviewEntry("storage_type", "modelo", z("storage_type")),
+		OverviewEntry(
+			"net_weight_oz", "modelo", z("net_weight_oz", _quartile_key(rows, "net_weight_oz"))
+		),
+		OverviewEntry(
+			"nutrition_score", "modelo", z("nutrition_score", _quartile_key(rows, "nutrition_score"))
+		),
+		OverviewEntry(
+			"filter_price_min", "modelo", z("filter_price_min", _quartile_key(rows, "filter_price_min"))
+		),
+		OverviewEntry(
+			"filter_price_max", "modelo", z("filter_price_max", _quartile_key(rows, "filter_price_max"))
+		),
+		# Descartadas porque su informacion ya viaja en otra columna.
+		OverviewEntry(
+			"title",
+			"repetida",
+			z("title", lambda row: row.tag),
+			repetition_label="$\\rightarrow$ product_name + title_tag",
+		),
+		OverviewEntry(
+			"description",
+			"repetida",
+			z("description", _description_phrase),
+			repetition=description_tier_agreement(rows),
+			repetition_label="misma señal que title",
+		),
+		OverviewEntry(
+			"filter_category",
+			"repetida",
+			z("filter_category"),
+			repetition=identical_fraction(rows, "filter_category", "category"),
+			repetition_label="= category",
+		),
+		OverviewEntry(
+			"filter_storage_type",
+			"repetida",
+			z("filter_storage_type"),
+			repetition=identical_fraction(rows, "filter_storage_type", "storage_type"),
+			repetition_label="= storage_type",
+		),
+		OverviewEntry(
+			"package_size",
+			"repetida",
+			z("package_size"),
+			repetition=contained_fraction(rows, "package_size", "title"),
+			repetition_label="$\\subset$ title",
+		),
+		OverviewEntry(
+			"unit_of_measure",
+			"repetida",
+			z("unit_of_measure"),
+			repetition=contained_fraction(rows, "unit_of_measure", "package_size"),
+			repetition_label="$\\subset$ package_size",
+		),
+		# Descartada porque delata el target.
+		OverviewEntry(
+			"cart",
+			"fuga",
+			z("cart"),
+			repetition=sum(1 for row in rows if row.bought and row["cart"] == "true")
+			/ sum(row.bought for row in rows),
+			repetition_label="bought=true $\\Rightarrow$ cart=true",
+		),
+		# Descartadas porque ningun corte les encontro señal.
+		OverviewEntry("ingredients", "sin_senal", z("ingredients")),
+		OverviewEntry("timestamp", "sin_senal", z("timestamp", lambda row: row["timestamp"][:7])),
+		OverviewEntry(
+			"dimensions_in", "sin_senal", z("dimensions_in", _quartile_key(rows, "dimensions_in", _volume))
+		),
+		# Ni features ni descartes: definen el problema.
+		OverviewEntry("bought", "meta", None, note="target"),
+		OverviewEntry("query_id", "meta", None, note="agrupa el split"),
+	]
+
+
+def _truncate(value: str, limit: int = 44) -> str:
+	"""Shorten a cell keeping both ends, so a title's trailing tag stays visible."""
+	value = value.strip()
+	if len(value) <= limit:
+		return value
+	return value[: limit - 21] + "…" + value[-20:]
+
+
+def plot_csv_walkthrough(rows: Sequence[Row]) -> plt.Figure:
+	"""Two real CSV rows side by side, column by column, with the decision next to each.
+
+	This is the slide version of the analysis: no statistics, just the file as we
+	read it. The two products come from the same query, so the reader can see with
+	their own eyes that the filter_* columns repeat, that brand and package_size
+	sit inside title, and that cart mirrors bought.
+	"""
+	example_bought = example_not = None
+	for group in rows_by_query(rows).values():
+		if len(group) >= 2 and any(row.bought for row in group) and any(not row.bought for row in group):
+			example_bought = next(row for row in group if row.bought)
+			example_not = next(row for row in group if not row.bought)
+			break
+
+	# CSV column order on purpose: this is the file as it was first opened.
+	spec = [
+		("title", "repetida", "se parte: product_name + title_tag"),
+		("description", "repetida", "fuera — cuenta lo mismo que title"),
+		("price", "modelo", "queda — numerica"),
+		("category", "modelo", "queda — categorica"),
+		("timestamp", "sin_senal", "fuera — BTR plano mes a mes"),
+		("query_id", "meta", "no es feature — agrupa el split"),
+		("filter_category", "repetida", "fuera — = category en 10.000/10.000"),
+		("filter_price_min", "modelo", "queda — numerica"),
+		("filter_price_max", "modelo", "queda — numerica"),
+		("filter_storage_type", "repetida", "fuera — = storage_type en 10.000/10.000"),
+		("cart", "fuga", "fuera — bought=true $\\Rightarrow$ cart=true"),
+		("bought", "meta", "el target"),
+		("brand", "modelo", "queda — categorica"),
+		("package_size", "repetida", "fuera — se lee dentro de title"),
+		("unit_of_measure", "repetida", "fuera — se lee dentro de package_size"),
+		("net_weight_oz", "modelo", "queda — numerica"),
+		("dimensions_in", "sin_senal", "fuera — sin relacion con bought"),
+		("storage_type", "modelo", "queda — categorica"),
+		("ingredients", "sin_senal", "fuera — no suma sobre category+allergens"),
+		("allergens", "modelo", "queda — 'None' es categoria real, no un nulo"),
+		("nutrition_score", "modelo", "queda — numerica"),
+		("country_of_origin", "modelo", "queda — categorica"),
+	]
+
+	figure, axes = plt.subplots(figsize=(12.5, 0.34 * (len(spec) + 1) + 1.6))
+	axes.set_axis_off()
+	axes.set_xlim(0, 1)
+	axes.set_ylim(-len(spec) - 0.5, 1.5)
+
+	columns_x = (0.0, 0.17, 0.45, 0.73)
+	headers = ("columna", "producto comprado", "producto no comprado", "decision")
+	for x, header in zip(columns_x, headers):
+		axes.text(x, 0.55, header, fontsize=9.5, fontweight="bold", va="center")
+
+	for index, (column, group, reason) in enumerate(spec):
+		y = -index
+		color = OVERVIEW_GROUPS[group][1]
+		axes.add_patch(
+			plt.Rectangle((-0.01, y - 0.46), 1.02, 0.92, color=color, alpha=0.10, linewidth=0)
+		)
+		axes.text(columns_x[0], y, column, fontsize=9, va="center", color=color, fontweight="bold")
+		for x, example in zip(columns_x[1:3], (example_bought, example_not)):
+			axes.text(x, y, _truncate(example[column]), fontsize=8.5, va="center", family="monospace")
+		axes.text(columns_x[3], y, reason, fontsize=8.5, va="center")
+
+	handles = [plt.Rectangle((0, 0), 1, 1, color=color) for _, color in OVERVIEW_GROUPS.values()]
+	axes.legend(
+		handles,
+		[label for label, _ in OVERVIEW_GROUPS.values()],
+		loc="lower left",
+		bbox_to_anchor=(0.0, 1.02),
+		ncols=5,
+		frameon=False,
+		fontsize=8,
+		columnspacing=1.0,
+		handlelength=1.2,
+	)
+	axes.set_title(
+		"El CSV tal como lo leimos: dos productos de la misma query, columna por columna",
+		fontsize=12.5,
+		pad=30,
+	)
+	figure.text(
+		0.01,
+		0.005,
+		"Los cuatro filter_* son identicos en ambas filas: describen la busqueda, no el producto. "
+		"title se descompone en product_name (texto) y title_tag antes de descartarla.",
+		fontsize=8,
+		color=MUTED,
+	)
+	figure.tight_layout(rect=(0, 0.02, 1, 1))
+	return figure
+
+
+def plot_repeated_columns(rows: Sequence[Row]) -> plt.Figure:
+	"""How the repeated columns repeat, shown on one real row.
+
+	Three mechanisms, one per band: pieces of ``title`` that exist again as
+	standalone columns (containment), columns that are exact copies of another in
+	every row (equality), and ``description`` restating the title's popularity
+	claim (same signal twice). Built for the slide: values are real, arrows point
+	at the actual substrings.
+	"""
+	row = rows[0]  # the Cedar House pizza: every mechanism is visible in it
+
+	# (text, column, kept) — concatenating the texts reproduces title verbatim.
+	segments = [
+		("Cedar House", "brand", False),
+		(" Steamable Pepperoni Pizza ", "product_name", True),
+		("- ", None, None),
+		("10 oz", "package_size", False),
+		(" ", None, None),
+		("(Well Reviewed)", "title_tag", True),
+	]
+	assert "".join(text for text, *_ in segments) == row["title"]
+
+	figure = plt.figure(figsize=(12.5, 6.8))
+	axes = figure.add_axes([0, 0, 1, 1])
+	axes.set_axis_off()
+	axes.set_xlim(0, 1)
+	axes.set_ylim(0, 1)
+
+	kept_light, drop_light = "#d6efe7", "#fdeecd"
+
+	def chip(x, y, text, kept, fontsize=10):
+		axes.text(
+			x,
+			y,
+			text,
+			ha="center",
+			va="center",
+			fontsize=fontsize,
+			family="monospace",
+			bbox={
+				"boxstyle": "round,pad=0.45",
+				"facecolor": kept_light if kept else drop_light,
+				"edgecolor": POS if kept else ORANGE,
+				"linewidth": 1.2,
+			},
+		)
+
+	# ── Banda 1: title contiene tres columnas ────────────────────────────────
+	axes.text(0.03, 0.94, "1 · Dentro de title ya viajan otras columnas", fontsize=12, fontweight="bold")
+
+	font_size, char_ratio = 13.0, 0.602  # DejaVu Sans Mono advance per em
+	char_width = font_size * char_ratio / 72 / figure.get_figwidth()
+	total_chars = sum(len(text) for text, *_ in segments)
+	x_cursor = 0.5 - total_chars * char_width / 2
+	title_y, underline_y = 0.84, 0.815
+
+	axes.text(x_cursor - 0.012, title_y, "title:", ha="right", va="center", fontsize=10, color=MUTED)
+	for text, column, kept in segments:
+		width = len(text) * char_width
+		color = MUTED if column is None else (POS if kept else ORANGE)
+		axes.text(
+			x_cursor, title_y, text, ha="left", va="center",
+			fontsize=font_size, family="monospace", color=color,
+			fontweight="normal" if column is None else "bold",
+		)
+		if column is not None:
+			pad = char_width * (0.5 if text.startswith(" ") else 0.1)
+			axes.plot(
+				[x_cursor + pad, x_cursor + width - pad], [underline_y, underline_y],
+				color=color, linewidth=2.2, solid_capstyle="butt",
+			)
+		x_cursor += width
+
+	# Chips debajo, una por segmento señalado, flecha al subrayado. package_size
+	# baja a una segunda fila: su segmento queda pegado al de title_tag y las dos
+	# chips no caben a la misma altura.
+	chip_rows = {"brand": 0.66, "product_name": 0.66, "title_tag": 0.66, "package_size": 0.51}
+	package_center = None
+	x_cursor = 0.5 - total_chars * char_width / 2
+	for text, column, kept in segments:
+		width = len(text) * char_width
+		if column is not None:
+			center = x_cursor + width / 2
+			chip_y = chip_rows[column]
+			if column == "package_size":
+				package_center = center
+			label = (
+				f"{column}\n(derivada, queda)" if kept else f"{column} = '{text.strip()}'\n(columna aparte, fuera)"
+			)
+			chip(center, chip_y, label, kept, fontsize=9)
+			axes.annotate(
+				"",
+				xy=(center, chip_y + 0.055),
+				xytext=(center, underline_y - 0.012),
+				arrowprops={"arrowstyle": "->", "color": POS if kept else ORANGE, "linewidth": 1.1},
+			)
+		x_cursor += width
+	chip(
+		package_center - 0.27,
+		chip_rows["package_size"],
+		f"unit_of_measure = '{row['unit_of_measure']}'\n(columna aparte, fuera)",
+		False,
+		fontsize=9,
+	)
+	axes.text(
+		package_center - 0.15,
+		chip_rows["package_size"],
+		"$\\subset$",
+		ha="center",
+		va="center",
+		fontsize=13,
+		color=ORANGE,
+	)
+
+	# ── Banda 2: copias exactas ──────────────────────────────────────────────
+	axes.text(0.03, 0.42, "2 · Copias exactas, en las 10.000 filas", fontsize=12, fontweight="bold")
+	for offset, (kept_column, copy_column) in enumerate(
+		(("category", "filter_category"), ("storage_type", "filter_storage_type"))
+	):
+		y = 0.33
+		x0 = 0.16 + offset * 0.46
+		chip(x0, y, f"{kept_column} = '{row[kept_column]}'\n(queda)", True, fontsize=9.5)
+		axes.text(x0 + 0.115, y, "=", ha="center", va="center", fontsize=15, fontweight="bold")
+		chip(x0 + 0.25, y, f"{copy_column} = '{row[copy_column]}'\n(fuera)", False, fontsize=9.5)
+
+	# ── Banda 3: description repite la señal ─────────────────────────────────
+	axes.text(0.03, 0.20, "3 · description termina diciendo lo mismo que la etiqueta", fontsize=12, fontweight="bold")
+	closing = _description_phrase(row) + "."
+	chip(0.30, 0.10, f"description: '…{closing}'\n(fuera)", False, fontsize=9.5)
+	axes.text(0.545, 0.10, "misma señal que", ha="center", va="center", fontsize=10, color=MUTED)
+	chip(0.75, 0.10, "title_tag = '(Well Reviewed)'\n(queda)", True, fontsize=9.5)
+
+	return figure
+
+
+def plot_column_overview(rows: Sequence[Row]) -> plt.Figure:
+	"""The one-slide answer: every column, its signal, what it repeats, its fate.
+
+	Left panel: the chi-squared z against ``bought`` (same statistic as the signal
+	ranking). Right panel: the measured fraction of rows whose information already
+	exists in another column. Bar color is the decision, so a short left bar plus
+	no right bar reads "dropped for lack of signal", and a full right bar reads
+	"dropped as a duplicate" no matter how much signal the left panel shows.
+	"""
+	entries = build_overview(rows)
+	positions = [-index for index in range(len(entries))]
+	colors = [OVERVIEW_GROUPS[entry.group][1] for entry in entries]
+
+	figure, (ax_signal, ax_repeat) = plt.subplots(
+		1,
+		2,
+		figsize=(12.5, 0.36 * len(entries) + 2.6),
+		sharey=True,
+		gridspec_kw={"width_ratios": [1.15, 1.0]},
+	)
+
+	# Panel izquierdo: señal contra bought.
+	ax_signal.barh(
+		positions,
+		[max(entry.z_score, -1.0) if entry.z_score is not None else 0.0 for entry in entries],
+		color=colors,
+	)
+	ax_signal.set_yticks(positions)
+	ax_signal.set_yticklabels([entry.column for entry in entries], fontsize=9)
+	ax_signal.axvline(3.0, color=NEG, linestyle="--", linewidth=1)
+	ax_signal.text(3.4, 1.0, "umbral z=3", color=NEG, fontsize=8, va="bottom")
+	ax_signal.set_xscale("symlog")
+	ax_signal.set_xlabel("z de chi-cuadrado contra 'bought'  (escala log)")
+	ax_signal.set_title("¿Aporta señal?", fontsize=11)
+	for position, entry in zip(positions, entries):
+		if entry.z_score is None:
+			ax_signal.text(0.15, position, "—", va="center", fontsize=9, color=MUTED)
+
+	# Panel derecho: repeticion medida contra otra columna.
+	ax_repeat.barh(
+		positions,
+		[entry.repetition if entry.repetition is not None else 0.0 for entry in entries],
+		color=colors,
+	)
+	for position, entry in zip(positions, entries):
+		if entry.repetition is not None:
+			ax_repeat.text(
+				entry.repetition + 0.03,
+				position,
+				f"{entry.repetition_label}  ({entry.repetition:.0%})",
+				va="center",
+				fontsize=8,
+			)
+		elif entry.repetition_label:
+			ax_repeat.text(0.03, position, entry.repetition_label, va="center", fontsize=8, color=MUTED)
+		elif entry.note:
+			ax_repeat.text(0.03, position, entry.note, va="center", fontsize=8, color=MUTED)
+	ax_repeat.set_xlim(0, 1.9)
+	ax_repeat.set_xticks([0, 0.25, 0.5, 0.75, 1.0])
+	ax_repeat.set_xticklabels(["0%", "25%", "50%", "75%", "100%"])
+	ax_repeat.set_xlabel("filas cuya informacion ya esta en otra columna")
+	ax_repeat.set_title("¿Repite otra columna?", fontsize=11)
+
+	# Separadores entre grupos de decision, cruzando ambos paneles.
+	boundaries = [
+		position + 0.5
+		for position, (previous, current) in zip(positions[1:], zip(entries, entries[1:]))
+		if previous.group != current.group
+	]
+	for axis in (ax_signal, ax_repeat):
+		for boundary in boundaries:
+			axis.axhline(boundary, color=BASELINE, linewidth=0.6, linestyle=(0, (2, 3)))
+		axis.set_ylim(positions[-1] - 0.6, 1.2)
+		axis.spines[["top", "right"]].set_visible(False)
+
+	handles = [
+		plt.Rectangle((0, 0), 1, 1, color=color) for _, color in OVERVIEW_GROUPS.values()
+	]
+	figure.legend(
+		handles,
+		[label for label, _ in OVERVIEW_GROUPS.values()],
+		loc="lower center",
+		bbox_to_anchor=(0.5, 1.0),
+		ncols=5,
+		frameon=False,
+		fontsize=8.5,
+		columnspacing=1.2,
+		handlelength=1.2,
+	)
+	figure.suptitle(
+		"Las 22 columnas: señal, repeticion y decision", fontsize=13, y=1.06
+	)
+	figure.text(
+		0.01,
+		-0.01,
+		"* title_tag y product_name se derivan de title antes de descartarla.   "
+		"price: r lineal ≈ 0; la señal aparece al binear por cuartiles y es no monotona "
+		"dentro de categoria (figs. 03 y 04).",
+		fontsize=8,
+		color=MUTED,
+	)
+	figure.tight_layout()
+	return figure
 
 
 def _barh(
@@ -919,6 +1436,26 @@ def generate_figures(
 	return written
 
 
+def generate_overview_figures(rows: Sequence[Row], output_dir: Path) -> list[Path]:
+	"""Write the CSV walkthrough (the slide) and the all-columns overview (appendix).
+
+	PNG like the query figures: they go on slides.
+	"""
+	output_dir.mkdir(parents=True, exist_ok=True)
+	figures = {
+		"00_csv_ejemplo": plot_csv_walkthrough(rows),
+		"00b_resumen_columnas": plot_column_overview(rows),
+		"00c_columnas_repetidas": plot_repeated_columns(rows),
+	}
+	written = []
+	for name, figure in figures.items():
+		path = output_dir / f"{name}.png"
+		figure.savefig(path, dpi=200, bbox_inches="tight")
+		plt.close(figure)
+		written.append(path)
+	return written
+
+
 def generate_query_figures(rows: Sequence[Row], output_dir: Path) -> list[Path]:
 	"""Write the three figures that justify grouping the split by ``query_id``.
 
@@ -946,7 +1483,8 @@ def main() -> None:
 	rows = load_rows()
 	signals = build_report(rows)
 	print_summary(rows, signals)
-	written = generate_figures(rows, signals, OUTPUT_DIR)
+	written = generate_overview_figures(rows, OUTPUT_DIR)
+	written += generate_figures(rows, signals, OUTPUT_DIR)
 	written += generate_query_figures(rows, OUTPUT_DIR)
 	print(f"\n{len(written)} figuras escritas en {OUTPUT_DIR}:")
 	for path in written:

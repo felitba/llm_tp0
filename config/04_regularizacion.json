@@ -1,0 +1,127 @@
+{
+  "_step": "04",
+  "_comment": "PASO 4 - Regularizacion y optimizacion, un factor por vez sobre la capacidad ganadora del paso 3. Es el material de la filmina de overfitting/underfitting que pide la consigna: cada brazo guarda su curva train-vs-val en run.json, asi que la conclusion se lee en las curvas y no solo en el numero de test.",
+  "_carry_forward": "Del paso 3: d_model, n_heads, num_layers y dim_feedforward ganadores. Copialos al bloque base.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag",
+    "brand",
+    "storage_type",
+    "country_of_origin"
+  ],
+  "numeric_columns": [
+    "price",
+    "nutrition_score",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s4_base",
+      "_comment": "La configuracion ganadora del paso 3, repetida como referencia.",
+      "overrides": {}
+    },
+    {
+      "name": "s4_dropout_0",
+      "_comment": "Sin dropout: cuanto sobreajusta el modelo desnudo.",
+      "overrides": {
+        "dropout": 0.0
+      }
+    },
+    {
+      "name": "s4_dropout_01",
+      "_comment": "",
+      "overrides": {
+        "dropout": 0.1
+      }
+    },
+    {
+      "name": "s4_dropout_02",
+      "_comment": "",
+      "overrides": {
+        "dropout": 0.2
+      }
+    },
+    {
+      "name": "s4_wd_0",
+      "_comment": "Sin weight decay.",
+      "overrides": {
+        "weight_decay": 0.0
+      }
+    },
+    {
+      "name": "s4_wd_001",
+      "_comment": "",
+      "overrides": {
+        "weight_decay": 0.01
+      }
+    },
+    {
+      "name": "s4_wd_005",
+      "_comment": "",
+      "overrides": {
+        "weight_decay": 0.05
+      }
+    },
+    {
+      "name": "s4_lr_1e4",
+      "_comment": "Mas lento: converge mas tarde pero mas parejo?",
+      "overrides": {
+        "learning_rate": 0.0001
+      }
+    },
+    {
+      "name": "s4_lr_1e3",
+      "_comment": "Mas rapido: puede pasarse de largo.",
+      "overrides": {
+        "learning_rate": 0.001
+      }
+    }
+  ]
+}

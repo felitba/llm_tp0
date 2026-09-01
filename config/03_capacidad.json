@@ -1,0 +1,136 @@
+{
+  "_step": "03",
+  "_comment": "PASO 3 - Cuanta capacidad conviene. Un factor por vez desde la base chica, que es lo que pide la consigna ('arquitectura base pequena ... luego ir aumentando la complejidad'), y NO un grid: un grid de 60+ celdas elegidas por el maximo de val_pr_auc es el maximo de 60 tiradas ruidosas sobre un solo split de validacion y no reproduce en test. n_heads usa {2,4,8} porque divide a 64, 96 y 128; con 6 heads las celdas de 64 y 128 ni siquiera corren (nn.MultiheadAttention exige d_model %% n_heads == 0). dim_feedforward se varia como RAZON de d_model (1x/2x/4x) para que las celdas signifiquen lo mismo a distinto ancho.",
+  "_carry_forward": "Del paso 2: use_encoder y pooling ganadores, ademas de las columnas del paso 1.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_pr_auc",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag",
+    "brand",
+    "storage_type",
+    "country_of_origin"
+  ],
+  "numeric_columns": [
+    "price",
+    "nutrition_score",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s3_base_d96_h4_l2_ff2x",
+      "_comment": "La base. Todo lo demas se lee contra esta.",
+      "overrides": {}
+    },
+    {
+      "name": "s3_d64",
+      "_comment": "Mas angosto.",
+      "overrides": {
+        "d_model": 64,
+        "dim_feedforward": 128
+      }
+    },
+    {
+      "name": "s3_d128",
+      "_comment": "Mas ancho.",
+      "overrides": {
+        "d_model": 128,
+        "dim_feedforward": 256
+      }
+    },
+    {
+      "name": "s3_l1",
+      "_comment": "Una sola capa: hay profundidad de sobra?",
+      "overrides": {
+        "num_layers": 1
+      }
+    },
+    {
+      "name": "s3_l3",
+      "_comment": "Tres capas.",
+      "overrides": {
+        "num_layers": 3
+      }
+    },
+    {
+      "name": "s3_l4",
+      "_comment": "Cuatro capas.",
+      "overrides": {
+        "num_layers": 4
+      }
+    },
+    {
+      "name": "s3_h2",
+      "_comment": "Dos cabezas: 48 dims por cabeza.",
+      "overrides": {
+        "n_heads": 2
+      }
+    },
+    {
+      "name": "s3_h8",
+      "_comment": "Ocho cabezas: 12 dims por cabeza.",
+      "overrides": {
+        "n_heads": 8
+      }
+    },
+    {
+      "name": "s3_ff1x",
+      "_comment": "FFN sin expansion (ratio 1x).",
+      "overrides": {
+        "dim_feedforward": 96
+      }
+    },
+    {
+      "name": "s3_ff4x",
+      "_comment": "FFN 4x, la convencion del paper original.",
+      "overrides": {
+        "dim_feedforward": 384
+      }
+    }
+  ]
+}
