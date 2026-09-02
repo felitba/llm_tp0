@@ -31,7 +31,6 @@ from config.config import resolve_path  # noqa: E402
 from config.experiments import base_name, experiment_names  # noqa: E402
 from metrics.error_analysis import build_error_analysis, write_error_analysis  # noqa: E402
 from metrics.final_table import aggregate, final_results, format_table, write_final_table  # noqa: E402
-from metrics.uncertainty import query_bootstrap_ci  # noqa: E402
 from metrics.run_results import (  # noqa: E402
 	RunResults, SPLIT_PREDICTION_FILES, experiments_dir, load_run, output_dir_from_config,
 	query_ids_for, run_dir, save_run, write_summary_csv,
@@ -281,7 +280,6 @@ def main() -> None:
 	         if args.rule == "ensemble" and args.ensemble_from is None
 	         else f" (mean of epochs {args.ensemble_from}..end)" if args.rule == "ensemble" else ""))
 	header = (f"{'experiment':<30}{'was':>10}{'now':>6}{'val_loss':>10}{'val_ap':>8}"
-	          f"{'val 95% CI':>16}"
 	          + (f"{'test_loss':>11}{'test_roc':>10}{'test_ap':>9}{'was_ap':>9}"
 	             if args.final else f"{'test':>39}"))
 	print(header)
@@ -307,7 +305,6 @@ def main() -> None:
 		val_labels = run.epoch_predictions["val_labels"].astype(int)
 		val = selected_probs(run, epoch, ensemble_from)["val"]
 		val_queries = query_ids_for(run, "validation")
-		val_ci = query_bootstrap_ci(val_labels, val, val_queries)
 		if epoch is None:
 			val_loss, val_pr = bce_loss(val_labels, val), float(pr_auc_score(val_labels, val))
 			now = f"{ensemble_from}+"
@@ -337,7 +334,7 @@ def main() -> None:
 		)
 		print(
 			f"{name:<30}{str(was_epoch or '?'):>10}{now:>6}{val_loss:>10.4f}"
-			f"{val_pr:>8.3f}{f'[{val_ci[0]:.3f},{val_ci[1]:.3f}]':>16}{test_columns}"
+			f"{val_pr:>8.3f}{test_columns}"
 		)
 		if args.apply and test is None:
 			print(f"{'':<30} --apply needs --final: nothing written")
