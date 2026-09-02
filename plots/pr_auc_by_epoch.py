@@ -20,8 +20,7 @@ from plots.plot_theme import (
 
 def plot_pr_auc_by_epoch(
 	epoch_metrics: Sequence[dict],
-	best_epoch: int | None = None,
-	title: str = "PR-AUC by epoch",
+	title: str = "PR-AUC por época",
 	hyperparameters: str | None = None,
 	chance_level: float | None = None,
 	baseline_level: float | None = None,
@@ -30,11 +29,14 @@ def plot_pr_auc_by_epoch(
 	figure, axes = plt.subplots(figsize=(6.2, 4))
 	epochs = [row["epoch"] for row in epoch_metrics]
 
-	for split, key in (("train", "train_pr_auc"), ("validation", "val_pr_auc")):
+	for split, key, label in (
+		("train", "train_pr_auc", "entrenamiento"),
+		("validation", "val_pr_auc", "validación"),
+	):
 		if epoch_metrics and key in epoch_metrics[0]:
 			axes.plot(
 				epochs, [row[key] for row in epoch_metrics],
-				color=SPLIT_COLORS[split], label=split,
+				color=SPLIT_COLORS[split], label=label,
 			)
 
 	if chance_level is not None:
@@ -50,14 +52,12 @@ def plot_pr_auc_by_epoch(
 			xy=(epochs[-1] if epochs else 0, baseline_level), xytext=(-4, 4),
 			textcoords="offset points", ha="right", fontsize=8, color=MUTED,
 		)
-	if best_epoch is not None:
-		axes.axvline(best_epoch, color=BASELINE, linestyle=DASH, linewidth=1)
-		axes.annotate(
-			f"checkpoint (ep. {best_epoch})", xy=(best_epoch, axes.get_ylim()[0]),
-			xytext=(4, 6), textcoords="offset points", fontsize=8, color=MUTED,
-		)
+	# CHANGED (2026-09-01): aca se marcaba la epoca del checkpoint con una linea
+	# vertical y su anotacion. Sale de las figuras: la regla de seleccion se
+	# explica en sus propias filminas (scripts/slide_seleccion.py), no encima de
+	# cada curva. La curva queda como lo que es, una curva por epoca.
 
-	axes.set_xlabel("Epoch")
+	axes.set_xlabel("Época")
 	axes.set_ylabel("PR-AUC")
 	set_title(axes, title)
 	legend_top_left(axes, subtitle=hyperparameters)

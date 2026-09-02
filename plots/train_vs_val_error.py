@@ -1,11 +1,10 @@
 import matplotlib.pyplot as plt
 
-from plots.plot_theme import BASELINE, BODY, DASH, SPLIT_COLORS, apply_theme, legend_top_left
+from plots.plot_theme import BODY, SPLIT_COLORS, apply_theme, legend_top_left
 
 
 def plot_training_progress(
     losses,
-    best_epoch: int | None = None,
     title: str | None = None,
     hyperparameters: str | None = None,
     show: bool = False,
@@ -16,7 +15,6 @@ def plot_training_progress(
     Args:
         losses: Training history as {"train": [...], "val": [...]}. The old
                 alternating list format is still accepted for compatibility.
-        best_epoch: Checkpoint restored for test evaluation.
         title: Figure title shown above the loss plot.
         hyperparameters: Compact, optionally multi-line annotation below the plot.
     """
@@ -36,7 +34,7 @@ def plot_training_progress(
     axes.plot(
         range(1, epochs + 1),
         train_losses,
-        label='Training loss',
+        label='Pérdida en entrenamiento',
         marker=marker,
         color=SPLIT_COLORS["train"],
     )
@@ -44,24 +42,19 @@ def plot_training_progress(
         axes.plot(
             range(1, len(val_losses) + 1),
             val_losses,
-            label='Validation loss',
+            label='Pérdida en validación',
             marker=marker,
             color=SPLIT_COLORS["validation"],
         )
-        # New runs may select a checkpoint by PR-AUC rather than by loss. Older
-        # run.json files have no saved selection, so retain their old min-loss
-        # marker when replotting them.
-        selected_epoch = best_epoch or (min(range(len(val_losses)), key=val_losses.__getitem__) + 1)
-        axes.axvline(
-            selected_epoch, color=BASELINE, linestyle=DASH,
-            label=f'Best checkpoint ({selected_epoch})',
-        )
+        # CHANGED (2026-09-01): aca iba una vertical en la epoca del checkpoint.
+        # Sale de la figura -- la regla de seleccion vive en sus propias filminas,
+        # no encima de la curva de perdida.
 
     _style_epoch_axis(axes, last_epoch)
-    axes.set_xlabel('Epoch')
-    axes.set_ylabel('Loss')
+    axes.set_xlabel('Época')
+    axes.set_ylabel('Pérdida')
     legend_top_left(axes)
-    figure.suptitle(title or 'Training vs. Validation Loss', y=0.98, fontweight='semibold')
+    figure.suptitle(title or 'Pérdida: entrenamiento vs. validación', y=0.98, fontweight='semibold')
     footer_height = 0.13 if hyperparameters else 0.04
     figure.tight_layout(rect=(0, footer_height, 1, 0.90))
     if hyperparameters:

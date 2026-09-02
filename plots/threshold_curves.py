@@ -179,12 +179,12 @@ def _draw_baseline(axes: plt.Axes, diagonal: bool, level: float | None) -> None:
 	if diagonal:
 		axes.plot(
 			[0.0, 1.0], [0.0, 1.0],
-			color=BASELINE, linestyle=DASH, linewidth=1.2, label="Chance",
+			color=BASELINE, linestyle=DASH, linewidth=1.2, label="Azar",
 		)
 	if level is not None:
 		axes.axhline(
 			level, color=BASELINE, linestyle=DASH, linewidth=1.2,
-			label=f"Chance ({level:.3f})",
+			label=f"Azar ({level:.3f})",
 		)
 
 

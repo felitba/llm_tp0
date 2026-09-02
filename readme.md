@@ -1,182 +1,203 @@
-# Transformers
-TP1 - 73.69 Large Language Models - 2026
+# BTR prediction with an encoder-only Transformer
 
-## Project Structure
+**TP1 — 73.69 Large Language Models — ITBA, 2026**
 
-```text
-main.py                     train every experiment in a config file
-replot.py                   redraw every figure from saved results, no retrain
+Predict **BTR (Buy Through Rate)** — will an impressed product be bought — from
+`dataset/supermarket_products.csv` (10,000 impressions, 22 columns, 2,012 queries,
+base BTR 0.1301), using an encoder-only Transformer whose row representation is
+FT-Transformer style: **one token per feature**.
 
-config/     config.py       repo-root-relative paths + config loading
-            config.json     base hyperparameters and the experiments[] list
-            *.json          one file per ablation (text vs. feature tokens, ...)
-dataset/    supermarket_products.csv
-            preprocess_dataset.py   title split, drops, split-by-query, id encoding
-            product_dataset.py      DataFrame -> tensors -> DataLoaders
-            print_processed_data.py the split report writer
-model/      feature_tokenizer.py    a row -> [CLS] + title + numeric + categorical
-            encoding_block.py       the TransformerEncoder stack
-            encoder_only_model.py   tokenizer -> encoder -> CLS -> MLP head
-            checkpoint.py           save/load trained weights (opt-in)
-            positional_encoding.py  tokenizer.py
-metrics/    metrics.py      precision / recall / fall-out from confusion counts
-            run_results.py  what a run writes to disk, and how to read it back
-plots/      plot_theme.py   the deck palette: colors, fonts, line weights
-            threshold_curves.py     curves by sweeping every distinct score
-            pr_auc.py  roc_auc.py   the two axis choices
-            train_vs_val_error.py   the loss curve
-            experiment_plots.py     the plotting path main.py and replot.py share
-scripts/    eda_columns.py   eda_dataset.py   count_bought_by_title_tag.py
-baselines/  bert_model.py  visualize_trained_model.py   (side comparison)
-output/     every generated artifact; the only directory git ignores
-docs/       comentarios_para_el_equipo/
-```
+> **The single project document is [`docs/INFORME.md`](docs/INFORME.md)** — problem
+> definition, EDA, assumptions, architecture, evaluation protocol, results, and what is
+> still open. This README only covers how to run the code.
+> The frozen model-selection protocol is [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
-Source and generated files never share a directory: anything a run writes goes
-under `output/` (experiment runs, figures, EDA, reports), and `output/` is what
-`.gitignore` covers.
-
+---
 
 ## Setup
-Requirements may include:
-- Python 3.10+
-- PyTorch or relevant ML framework
-- pandas
-- numpy
-- scikit-learn
-- matplotlib / seaborn for analysis and reporting
-
-Create and activate a virtual environment:
 
 ```bash
-# Windows (PowerShell)
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-
-# Windows (CMD)
-python -m venv .venv
-.venv\Scripts\activate.bat
-
-# macOS / Linux
 python3 -m venv .venv
-source .venv/bin/activate
-```
-
-Install the project dependencies from the requirements file:
-
-```bash
+source .venv/bin/activate                 # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-## Usage
-From the project root, activate your virtual environment and run the training entry point:
+> **`requirements.txt` is incomplete and UTF-16/CRLF encoded.** It is missing `tiktoken`
+> (needed by `model/tokenizer.py`) and `scikit-learn` (needed by `plots/pr_auc.py` and
+> `plots/roc_auc.py`), plus `transformers` and `datasets`, which only `baselines/` needs.
+> Until it is regenerated:
+>
+> ```bash
+> pip install tiktoken scikit-learn
+> ```
+
+`python` is not on the PATH outside the venv — activate it, or prefix every command with
+`.venv/bin/python`. Everything expects to be launched from the repository root.
+
+## Running experiments
+
+The live experiment plan is six ordered config files, one per ablation step. Each one
+declares its own `output_dir` and carries a `_carry_forward` note saying what to copy into
+the next step.
 
 ```bash
-# Windows (PowerShell)
-.\.venv\Scripts\Activate.ps1
-python main.py
-
-# Windows (CMD)
-.\.venv\Scripts\activate.bat
-python main.py
-
-# macOS / Linux
-source .venv/bin/activate
-python main.py
+python main.py --config config/01_entrada.json     # what the encoder reads, and how
+python main.py --config config/02_transformer.json # is the attention worth anything?
+python main.py --config config/03_capacidad.json   # d_model / layers / heads / FFN ratio
+python main.py --config config/04_regularizacion.json  # dropout / weight decay / lr
+python main.py --config config/05_modulos.json     # ReLU vs GELU, pre-LN, linear probe
+python main.py --config config/06_semillas.json    # error bars on the final model
 ```
 
-If you are using the Python launcher on Windows, this is also valid:
+`main.py` reads `experiments[]` from the config file and, for each entry, deep-copies the
+base config and applies its `overrides`. A top-level `"seeds": [42, 7, 1234]` multiplies
+every entry into one run per seed (`<name>_seed<n>`). **An ablation is a JSON edit, not a
+code change.**
 
 ```bash
-py main.py
+python main.py --config config/01_entrada.json --experiment s1_04_5col_tokens        # its 3 seeds
+python main.py --config config/01_entrada.json --experiment s1_04_5col_tokens_seed7  # just one
+python main.py --epochs 1 --no-plots                 # smoke test
+python main.py --config ... --save-weights           # also write model.pt (~20 MB per run)
+python main.py --config ... --no-error-patterns      # skip the batch-level error report
+python main.py --print-cls-btr                       # dump per-product CLS logit/prob/label
 ```
 
-The script expects to be launched from the repository root so that relative paths such as `config/config.json` and `dataset/supermarket_products.csv` resolve correctly.
+Steps 02 and 05 are **not runnable yet**: `use_encoder` / `pooling` (step 02) and
+`norm_first` / head depth (step 05) are declared in the configs but not implemented in the
+model. See `docs/INFORME.md` §9.
 
-Configuration is loaded from:
+`config/config.json` (the default when `--config` is omitted) and
+`config/text_vs_feature_tokens.json`, `config/feature_tokens*.json`,
+`config/no_signal_columns.json` are **legacy**: they predate the protocol, select on
+`val_pr_auc`, and their numbers are not comparable with steps 01–06.
 
-```text
-config/config.json
-```
+## What a run writes
 
-Optional experiment and training controls are available via CLI arguments, for example:
-
-```bash
-python main.py --experiment base
-python main.py --epochs 1 --no-plots
-python main.py --experiment base --save-weights
-```
-
-## Running Experiments
-Experiment definitions are stored in `config/config.json` under the `experiments` array. Each experiment has a unique `name` and an `overrides` object for model or training settings.
-
-Run all configured experiments:
-
-```bash
-python main.py
-```
-
-Run one experiment by name:
-
-```bash
-python main.py --experiment small_d64_l2
-python main.py --experiment medium_d96_l2
-python main.py --experiment small_d64_l3
-```
-
-For a quick smoke test, override the epoch count and optionally skip plots:
-
-```bash
-python main.py --experiment small_d64_l2 --epochs 1 --no-plots
-```
-
-Training plots are saved under `output/experiments/<experiment_name>/`, and metrics for all selected experiments are written to `output/experiments/summary.csv`.
-
-### Saved results and replotting
-
-Every experiment also writes what it produced next to its figures, so no figure ever needs a retrain:
+Under `<output_dir>/<name>/`, where `<output_dir>` is the config's `"output_dir"` key
+(`config/01_entrada.json` → `output/01_entrada/`), falling back to `output/experiments/`:
 
 | file | contents |
 | --- | --- |
-| `output/experiments/<name>/run.json` | merged config, per-epoch train/val loss and AUCs, test metrics, summary row |
-| `output/experiments/<name>/test_predictions.csv` | one row per test product, `label,probability` |
+| `run.json` | merged config, per-epoch train/val loss and AUCs, the `selection` block (which epoch the test row describes and by what rule), test metrics, summary row |
+| `test_predictions.csv` | one row per test product, `label,probability` |
+| `epoch_predictions.npz` | validation **and** test probabilities at every epoch (<1 MB) |
+| `test_error_analysis.csv` | the test rows as a person can read them, worst prediction first, ids decoded back to names |
+| `loss.jpg`, `pr_auc.jpg`, `roc_auc.jpg`, … | the figures |
 
-The ROC and PR curves are integrated over every distinct score, so keeping the scores keeps every curve and threshold reproducible. `replot.py` reads those files back and redraws (it never imports torch):
+Per batch: `summary.csv` (one row per run), the `*_all_configs.jpg` comparison figures,
+`error_patterns.txt` / `.jpg`, and — only with `reselect --final` — `resultados_finales.csv`.
 
-```bash
-python replot.py                                       # every saved run, plus the all-configs figures
-python replot.py medium_d96_l2_baseline medium_d128_l2 # only these
-python replot.py --config config/text_vs_feature_tokens.json --suffix text_vs_feature_tokens
-```
+The ROC and PR curves are integrated over every distinct score, so keeping the scores keeps
+every curve and threshold reproducible without a forward pass. `epoch_predictions.npz` is
+what makes the checkpoint rule a post-hoc decision.
 
-`--suffix` names the combined figures `roc_auc_all_configs_<suffix>.jpg` / `pr_auc_all_configs_<suffix>.jpg`, so one config file's comparison does not overwrite another's.
-
-All figures — training, curves and EDA — take their colors, fonts and line weights from `plots/plot_theme.py`, the same palette as the slide deck. Change a hex there and `python replot.py` restyles the whole deck in seconds. Axis titles are off by default (the title lives on the slide); set `SHOW_AXES_TITLES = True` in `plots/plot_theme.py` to get them back while iterating locally.
-
-### Saved weights
-
-Weights are **not** saved by default. Ask for them per run:
+## Reporting, without retraining
 
 ```bash
-python main.py --experiment medium_d96_l2_baseline --save-weights
+# compare the arms of a step on VALIDATION (test stays closed)
+python scripts/reselect.py --config config/01_entrada.json
+python scripts/reselect.py --config config/01_entrada.json --rule val_pr_auc   # another rule
+
+# once, when the model is already chosen
+python scripts/reselect.py --config config/01_entrada.json --apply --final
+
+# figures
+python replot.py --config config/01_entrada.json           # redraw a step from disk
+python replot.py                                           # every saved run
+python replot.py s1_04_5col_tokens_seed42                  # only these
+python replot.py --config ... --suffix mystep --no-combined
+
+# analysis
+python scripts/error_patterns.py --config config/01_entrada.json  # where the batch fails
+python scripts/epoch_band.py --config config/01_entrada.json      # appendix: PR-AUC per epoch
+python scripts/step1_figures.py                                   # the step-1 slide figures
+python scripts/slide_seleccion.py --config config/01_entrada.json
+python scripts/attention_map.py <name> --output-dir output/01_entrada   # needs --save-weights
 ```
 
-That adds `output/experiments/<name>/model.pt` — the state early stopping restored, i.e. the weights the reported test metrics came from, together with the `cardinalities`, merged `config` and `categorical_id_mapping` needed to rebuild the model:
+`replot.py` rebuilds every figure from what the runs wrote to disk and **never imports
+torch** — which is why `metrics/run_results.py` stays torch-free and weight I/O lives in
+`model/checkpoint.py`.
 
-### Feature tokens vs. plain text
+Figure styling — training curves, metric curves and EDA alike — lives in
+`plots/plot_theme.py` (Okabe-Ito palette, chosen to survive all three kinds of colour
+blindness). Change a hex there and `python replot.py` restyles the whole deck in seconds.
+Axis titles are off by default because the title lives on the slide; set
+`SHOW_AXES_TITLES = True` to get them back while iterating.
 
-`config/text_vs_feature_tokens.json` asks whether the encoder does better reading a row as feature tokens (one token per column, FT-Transformer style) or as a serialized `name: value | name: value` string handed to the text tokenizer alone. Architecture, optimizer and splits are identical across its three experiments, so only the representation differs:
-
-| experiment | how a row reaches the encoder |
-| --- | --- |
-| `feature_tokens` | control: `product_name` as text, plus 2 numeric and 5 categorical tokens |
-| `all_text_matched_columns` | the same 8 columns, serialized as text, no numeric or categorical tokens |
-| `all_text_every_column` | every column left after `drop_columns` (minus the label and `query_id`), serialized as text |
+## EDA
 
 ```bash
-python main.py --config config/text_vs_feature_tokens.json
+python scripts/eda_columns.py    # stdlib only; output/eda/00*–12*
+python scripts/eda_dataset.py    # output/eda/13*–17*
+python scripts/eda_slides.py     # output/eda/slides/*.png, in the deck palette
 ```
 
-The combined `output/experiments/roc_auc_all_configs.jpg` then holds exactly those three curves. `all_text_every_column` also sees columns the control never does, so read it against `all_text_matched_columns` to tell "more columns" apart from "text instead of feature tokens".
+`eda_columns.py` deliberately avoids pandas: `read_csv`'s default `na_values` turns the
+literal string `"None"` in `allergens` — a real category meaning "no allergens" — into
+`NaN`, inventing a 44.5% missing rate in a column with no missing values. It regenerates
+every number quoted in §2 of `docs/INFORME.md`.
 
-`text_column` in any config accepts a single column name, a list of column names, or `"all"` (everything `drop_columns` left, minus `text_exclude_columns`, which defaults to `bought` and `query_id`). Set `numeric_columns` and `categorical_columns` to `[]` to remove the tabular tokens entirely, and size `max_title_len` to the longest serialized row so nothing is truncated.
+## Modules inside packages
+
+They import `config.config`, so `python dataset/preprocess_dataset.py` fails. Use `-m`:
+
+```bash
+python -m dataset.preprocess_dataset   # writes output/preprocess_dataset_report.txt
+python -m config.config                # print the resolved config
+python -m model.tokenizer              # tiktoken smoke test
+```
+
+## Layout
+
+```text
+main.py                     train every experiment a config file declares
+replot.py                   redraw every figure from saved results, no retrain
+
+config/     config.py       repo-root-relative paths + config loading
+            experiments.py  experiments[] x seeds -> the runs a config means
+            0[1-6]_*.json   the live ablation plan, one file per step
+            config.json     legacy default; *.json others are legacy too
+dataset/    supermarket_products.csv
+            preprocess_dataset.py   title split, drops, split-by-query, binning,
+                                    train-only normalisation and id encoding
+            product_dataset.py      DataFrame -> tensors -> DataLoaders
+            print_processed_data.py the split report writer
+model/      feature_tokenizer.py    a row -> [CLS] + title + numeric + categorical
+            positional_encoding.py  sinusoids, applied to the text tokens only
+            encoding_block.py       the nn.TransformerEncoder stack
+            encoder_only_model.py   tokenizer -> encoder -> [CLS] -> MLP head
+            attention.py            recover the weights nn.TransformerEncoder discards
+            tokenizer.py            tiktoken GPT-2
+            checkpoint.py           save/load trained weights (opt-in)
+metrics/    metrics.py      precision / recall / fall-out from confusion counts
+            run_results.py  what a run writes to disk, and how to read it back
+            error_analysis.py       the test rows, decoded, worst first
+            uncertainty.py  query-level bootstrap CI
+            final_table.py  one row per configuration, the three seeds visible
+plots/      plot_theme.py   the palette: colors, fonts, line weights
+            threshold_curves.py     curves by sweeping every distinct score
+            pr_auc.py  roc_auc.py   the two axis choices
+            pr_auc_by_epoch.py  train_vs_val_error.py   the per-epoch curves
+            config_comparison.py    several runs on the same axes
+            calibration.py  reliability, score histogram, BTR by query
+            attention_map.py  error_patterns_figure.py
+            experiment_plots.py     the plotting path main.py and replot.py share
+scripts/    reselect.py  error_patterns.py  epoch_band.py  attention_map.py
+            eda_columns.py  eda_dataset.py  eda_slides.py
+            step1_figures.py  slide_seleccion.py  count_bought_by_title_tag.py
+baselines/  bert_model.py  visualize_trained_model.py   (side comparison, standalone)
+docs/       INFORME.md      the single project document
+            PROTOCOL.md     the frozen model-selection and evaluation protocol
+output/     every generated artifact
+```
+
+**Source and generated files never share a directory.** Anything a run writes goes under
+`output/`; a new figure goes there too, never next to the code that draws it.
+
+> ⚠ `.gitignore` currently also ignores several source files and `docs/PROTOCOL.md`.
+> Already-tracked files keep being versioned, but **new files in those paths are
+> invisible to git**. See `docs/INFORME.md` §9 before the final commit.
+
+There is no test suite and no linter config.

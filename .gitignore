@@ -17,12 +17,10 @@ dataset/test_preprocessing.py
 # Scratch dir; unrelated to the tracked baselines/ (BERT comparison).
 baseline/
 comentarios_para_el_equipo/extra/
-scripts/attention_map.py
-scripts/eda_slides.py
-scripts/epoch_band.py
-scripts/error_patterns.py
-scripts/reselect.py
+docs/INFORME.md
+docs/PROTOCOL.md
 .gitignore
-scripts/step1_figures.py
-.gitignore
-scripts/attention_map.py
+docs/PROTOCOL.md
+metrics/final_table.py
+plots/error_patterns_figure.py
+CLAUDE.md

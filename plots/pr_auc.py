@@ -122,8 +122,8 @@ def plot_pr_auc(
 	return plot_threshold_curve(
 		curve=curve,
 		x_label="Recall",
-		y_label="Precision",
-		title="Precision-Recall Curve",
+		y_label="Precisión",
+		title="Curva Precisión-Recall",
 		auc_label="PR AUC",
 		step=True,
 		baseline_y=positive_rate(y_true),
@@ -146,8 +146,8 @@ def plot_pr_auc_by_config(
 	return plot_combined_threshold_curves(
 		curves=curves,
 		x_label="Recall",
-		y_label="Precision",
-		title="Precision-Recall Curve by Configuration",
+		y_label="Precisión",
+		title="Curva Precisión-Recall por configuración",
 		auc_label="AUC",
 		step=True,
 		# Every config is scored on the same test split, so one chance line serves

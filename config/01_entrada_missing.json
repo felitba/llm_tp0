@@ -1,0 +1,82 @@
+{
+  "_step": "01",
+  "_comment": "PASO 1 - Que lee el encoder, y en que forma. Ablacion de ENTRADA con la arquitectura fija (d_model 96, 2 capas, 4 heads, FFN 192, dropout 0.3, lr 3e-4, wd 0.02, 50 epocas, split 42). 11 brazos x 3 semillas = 33 corridas. Los nombres van numerados por cantidad de entrada creciente (1 -> 2 -> 5 -> 8 -> 12 columnas) para que las figuras salgan siempre en ese orden y cada par que difiere en una sola cosa quede junto. Cuatro ejes: (A) CUANTO entra: 01 (1 col) -> 02 (2) -> 04 (5) -> 08 (8) -> 10 (12). (B) COMO se representa, feature tokens contra texto serializado, apareado en 5/8/12 columnas: 04<->05, 08<->09, 10<->11. (C) EL TEXTO hace falta?: 03 <-> 04 mide product_name cuando las tabulares ya estan. (D) PRICE, forma funcional: 04 (token lineal) <-> 12 (serializado como texto, 5 col) <-> 13 (texto, sin nombre). El bineado por cuartil dentro de category (brazos 06 y 07) se saco del proyecto el 2026-09-01 junto con bin_numeric_splits; sus corridas quedan en output/01_entrada como historia. product_name ocupa como maximo 10 subwords, asi que max_title_len 10 no trunca nada; los largos de los brazos de texto son el maximo medido con tiktoken gpt2 sobre el CSV. Corre: python main.py --config config/01_entrada.json",
+  "_no_se_ablaciona_aca": "Arquitectura y capacidad (02-03), regularizacion (04), modulos (05). Tampoco el split ni el preprocesamiento: cambiarlos cambia el test y rompe la comparacion.",
+  "_selection": "REPORTE: PR-AUC estimada como Average Precision sin interpolar (sklearn.metrics.average_precision_score via plots/pr_auc.pr_auc_score; ROC-AUC via sklearn.metrics.roc_auc_score), en el checkpoint de MINIMA val_loss. Se entrenan las 50 epocas siempre (patience 0) y al final se restaura ese checkpoint: no hay corte anticipado, la seleccion es post-hoc sobre todas las epocas. Protocolo completo en docs/PROTOCOL.md. Selecciona la perdida, evalua la metrica: la val_loss dice CUANDO empieza el sobreajuste y PR-AUC/ROC-AUC dicen QUE TAN UTIL es el clasificador. Es la regla convencional (Prechelt 1998; Goodfellow et al. 2016 Alg. 7.1 detienen sobre el error de validacion, no sobre la metrica) y hace que la curva de perdida del informe y el checkpoint reportado cuenten la misma historia. Contra maxima val_pr_auc son indistinguibles en un bake-off solo-validacion (0.7459 vs 0.7495 de AP media; 5.80 vs 6.20 de posicion media), asi que se elige por defendibilidad. COMPARACION ENTRE BRAZOS: sobre VALIDACION. Test se lee una sola vez, al final, con scripts/reselect.py --final. Se reportan las 3 semillas (media y rango), nunca la mejor. Cada corrida guarda las probabilidades de val y test de TODAS las epocas (epoch_predictions.npz).",
+  "_carry_forward": "El ganador define text_column / numeric_columns / categorical_columns / max_title_len de TODOS los pasos siguientes (02-06 hoy llevan las listas de 12 columnas: actualizarlas con el ganador de aca).",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/01_entrada",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "seeds": [
+    42,
+    7,
+    1234
+  ],
+  "_seeds": "Cada brazo se entrena una vez por semilla de inicializacion (corridas <brazo>_seed<n>); split_seed queda fijo, asi la unica variacion es el entrenamiento. Las figuras agrupan por config-menos-seed y muestran media y rango (plots/config_comparison.seed_groups). 11 brazos x 3 semillas = 33 corridas, ~75 min en CPU. IMPORTANTE: no se elige la mejor semilla, se reportan las tres (media y rango); quedarse con la mejor de tres seria una segunda seleccion sobre ruido, peor que la de epoca. --experiment <brazo> corre sus tres semillas; --experiment <brazo>_seed7 una sola.",
+  "dropout": 0.15,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_loss",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "title_tag",
+    "category",
+    "allergens"
+  ],
+  "numeric_columns": [
+    "price"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 10,
+  "experiments": [
+    {
+      "name": "s1_4coltexto",
+      "overrides": {
+        "text_column": [
+          "title_tag",
+          "category",
+          "allergens",
+          "price"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [],
+        "max_title_len": 40
+      }
+    }
+  ]
+}

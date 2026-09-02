@@ -20,12 +20,13 @@ import csv
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from config.config import PROJECT_ROOT
+from config.config import PROJECT_ROOT, resolve_path
 
 EXPERIMENTS_DIR = PROJECT_ROOT / "output" / "experiments"
 _experiments_dir = EXPERIMENTS_DIR
@@ -213,7 +214,10 @@ def load_run(name: str) -> RunResults:
 		with np.load(epoch_path, allow_pickle=False) as data:
 			epoch_predictions = {key: data[key] for key in data.files}
 	return RunResults(
-		name=payload.get("name", name),
+		# The directory is authoritative: a stored name survives folder renames
+		# and then mislabels every combined figure (seen 2026-09-01 in
+		# output/03_capacidad, where renamed run dirs kept their old names).
+		name=name,
 		config=payload.get("config", {}),
 		history=payload.get("history", {}),
 		epoch_metrics=payload.get("epoch_metrics", []),
@@ -276,6 +280,35 @@ def saved_run_names() -> list[str]:
 def load_runs(names: list[str] | None = None) -> list[RunResults]:
 	"""Load the named runs, or every saved run when ``names`` is None."""
 	return [load_run(name) for name in (names if names is not None else saved_run_names())]
+
+
+@lru_cache(maxsize=4)
+def _query_id_column(dataset_path: str) -> np.ndarray:
+	"""query_id of every row of the raw CSV, indexed by row id."""
+	import pandas as pd  # noqa: PLC0415  (only the query-id path needs it)
+
+	return pd.read_csv(resolve_path(dataset_path))["query_id"].to_numpy()
+
+
+def query_ids_for(run: RunResults, split: str) -> np.ndarray:
+	"""The query_id of every row of ``split``, in the order the run stored them.
+
+	Only ``test_predictions.csv`` persists the column, so validation would
+	otherwise have no way to be grouped by query -- and since the arms are
+	compared on validation (docs/PROTOCOL.md), the query bootstrap there is the
+	interval every comparison is read against. Row ids are positions in the raw
+	CSV, so the column is always recoverable without re-running preprocessing.
+
+	Returns an empty array when the run has neither row ids nor a dataset path.
+	"""
+	row_ids = run.split_row_ids.get(split)
+	if row_ids is None or not len(row_ids):
+		key = f"{'val' if split == 'validation' else split}_row_ids"
+		row_ids = run.epoch_predictions.get(key)
+	path = (run.config or {}).get("dataset_path")
+	if not path or row_ids is None or not len(row_ids):
+		return np.empty(0, dtype=object)
+	return _query_id_column(path)[np.asarray(row_ids, dtype=int)]
 
 
 def _load_predictions(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

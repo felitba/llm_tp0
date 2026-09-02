@@ -1,5 +1,5 @@
 {
-  "_comment": "Ablation: do the three columns the EDA calls signal-free (brand, storage_type, nutrition_score) earn their tokens? config.json trains on all three, while comentarios_para_el_equipo/ANALISIS_COLUMNAS.md argues each is indistinguishable from chance (brand chi2=14.6 with 14 dof, storage_type chi2=1.1, nutrition_score r=-0.019, all flat inside the high-intent tier too). Run with: python main.py --config config/no_signal_columns.json. Architecture, optimizer, splits and seed are identical across the five experiments, so the only thing that changes is which feature tokens the encoder is handed.",
+  "_comment": "Ablation: do the three columns the EDA calls signal-free (brand, storage_type, nutrition_score) earn their tokens? config.json trains on all three, while docs/INFORME.md section 2.6 argues each is indistinguishable from chance (brand chi2=14.6 with 14 dof, storage_type chi2=1.1, nutrition_score r=-0.019, all flat inside the high-intent tier too). Run with: python main.py --config config/no_signal_columns.json. Architecture, optimizer, splits and seed are identical across the five experiments, so the only thing that changes is which feature tokens the encoder is handed.",
   "dataset_path": "dataset/supermarket_products.csv",
   "d_model": 96,
   "vocab_size": 50257,

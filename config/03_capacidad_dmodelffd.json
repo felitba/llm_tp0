@@ -16,12 +16,18 @@
   "test_split": 0.1,
   "split_seed": 42,
   "seed": 42,
-  "dropout": 0.3,
+  "seeds": [
+    42,
+    7,
+    1234
+  ],
+  "_seeds": "Cada brazo se entrena una vez por semilla de inicializacion (42, 7, 1234); split_seed queda fijo, asi la unica variacion es el entrenamiento. Los brazos se comparan por la MEDIA de val_pr_auc / val_roc_auc entre las tres semillas, mostrando siempre los valores individuales y el rango: nunca se elige la mejor semilla. Una sola semilla queda reservada para pruebas exploratorias que no sostienen ninguna conclusion de la ablacion. 10 brazos x 3 semillas = 30 corridas.",
+  "dropout": 0.15,
   "batch_size": 64,
   "weight_decay": 0.02,
   "early_stopping_patience": 0,
   "early_stopping_min_delta": 0.0001,
-  "early_stopping_metric": "val_pr_auc",
+  "early_stopping_metric": "val_loss",
   "activation": "relu",
   "encoding": "gpt2",
   "drop_columns": [
@@ -46,30 +52,18 @@
   "categorical_columns": [
     "category",
     "allergens",
-    "title_tag",
-    "brand",
-    "storage_type",
-    "country_of_origin"
+    "title_tag"
   ],
   "numeric_columns": [
-    "price",
-    "nutrition_score",
-    "filter_price_min",
-    "filter_price_max",
-    "net_weight_oz"
+    "price"
   ],
   "text_column": [
     "product_name"
   ],
-  "max_title_len": 10,
+  "max_title_len": 0,
   "experiments": [
     {
-      "name": "s3_base_d96_h4_l2_ff2x",
-      "_comment": "La base. Todo lo demas se lee contra esta.",
-      "overrides": {}
-    },
-    {
-      "name": "s3_d64",
+      "name": "d64_ff2x_h4_n2",
       "_comment": "Mas angosto.",
       "overrides": {
         "d_model": 64,
@@ -77,60 +71,19 @@
       }
     },
     {
-      "name": "s3_d128",
+      "name": "d96_ff2x_h4_n2",
+      "_comment": "Medio.",
+      "overrides": {
+        "d_model": 96,
+        "dim_feedforward": 192
+      }
+    },
+    {
+      "name": "d128_ff2x_h4_n2",
       "_comment": "Mas ancho.",
       "overrides": {
         "d_model": 128,
         "dim_feedforward": 256
-      }
-    },
-    {
-      "name": "s3_l1",
-      "_comment": "Una sola capa: hay profundidad de sobra?",
-      "overrides": {
-        "num_layers": 1
-      }
-    },
-    {
-      "name": "s3_l3",
-      "_comment": "Tres capas.",
-      "overrides": {
-        "num_layers": 3
-      }
-    },
-    {
-      "name": "s3_l4",
-      "_comment": "Cuatro capas.",
-      "overrides": {
-        "num_layers": 4
-      }
-    },
-    {
-      "name": "s3_h2",
-      "_comment": "Dos cabezas: 48 dims por cabeza.",
-      "overrides": {
-        "n_heads": 2
-      }
-    },
-    {
-      "name": "s3_h8",
-      "_comment": "Ocho cabezas: 12 dims por cabeza.",
-      "overrides": {
-        "n_heads": 8
-      }
-    },
-    {
-      "name": "s3_ff1x",
-      "_comment": "FFN sin expansion (ratio 1x).",
-      "overrides": {
-        "dim_feedforward": 96
-      }
-    },
-    {
-      "name": "s3_ff4x",
-      "_comment": "FFN 4x, la convencion del paper original.",
-      "overrides": {
-        "dim_feedforward": 384
       }
     }
   ]

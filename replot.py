@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from config.config import resolve_path
-from config.experiments import experiment_names
+from config.experiments import base_name, experiment_names
 from plots.experiment_plots import plot_run, plot_runs_combined
 from metrics.run_results import (
 	experiments_dir, load_runs, output_dir_from_config, saved_run_names, set_experiments_dir,
@@ -41,14 +41,27 @@ def selected_names(args: argparse.Namespace) -> list[str]:
 	else:
 		return saved_run_names()
 
-	available = set(saved_run_names())
-	missing = [name for name in requested if name not in available]
+	saved = saved_run_names()
+	available = set(saved)
+	# An experiment name stands for all of its seeds, the same way
+	# `main.py --experiment <arm>` runs all three. Without this, redrawing one arm
+	# of a seeded batch means spelling out `<arm>_seed42 <arm>_seed7 <arm>_seed1234`,
+	# and forgetting one silently produces a figure whose "3 semillas" label is a lie.
+	resolved: list[str] = []
+	for name in requested:
+		if name in available:
+			resolved.append(name)
+			continue
+		seeded = [run for run in saved if base_name(run) == name]
+		resolved.extend(seeded if seeded else [name])
+
+	missing = [name for name in resolved if name not in available]
 	if missing:
 		raise SystemExit(
 			f"No saved results for: {', '.join(missing)}. "
 			f"Available: {', '.join(sorted(available)) or '(none)'}"
 		)
-	return requested
+	return resolved
 
 
 def parse_args() -> argparse.Namespace:

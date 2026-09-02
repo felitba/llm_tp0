@@ -1,8 +1,8 @@
 {
   "_step": "01",
-  "_comment": "PASO 1 - Que lee el encoder, y en que forma. Ablacion de ENTRADA con la arquitectura fija (d_model 96, 2 capas, 4 heads, FFN 192, dropout 0.3, lr 3e-4, wd 0.02, 50 epocas, split 42). 11 brazos x 3 semillas = 33 corridas. Los nombres van numerados por cantidad de entrada creciente (1 -> 2 -> 5 -> 8 -> 12 columnas) para que las figuras salgan siempre en ese orden y cada par que difiere en una sola cosa quede junto. Cuatro ejes: (A) CUANTO entra: 01 (1 col) -> 02 (2) -> 04 (5) -> 08 (8) -> 10 (12). (B) COMO se representa, feature tokens contra texto serializado, apareado en 5/8/12 columnas: 04<->05, 08<->09, 10<->11. (C) EL TEXTO hace falta?: 03 <-> 04 mide product_name cuando las tabulares ya estan. (D) PRICE, forma funcional: 04 (token lineal) <-> 06 (cuartil dentro de category) <-> 07 (los dos). product_name ocupa como maximo 10 subwords, asi que max_title_len 10 no trunca nada; los largos de los brazos de texto son el maximo medido con tiktoken gpt2 sobre el CSV. Corre: python main.py --config config/01_entrada.json",
+  "_comment": "PASO 1 - Que lee el encoder, y en que forma. Ablacion de ENTRADA con la arquitectura fija (d_model 96, 2 capas, 4 heads, FFN 192, dropout 0.3, lr 3e-4, wd 0.02, 50 epocas, split 42). 11 brazos x 3 semillas = 33 corridas. Los nombres van numerados por cantidad de entrada creciente (1 -> 2 -> 5 -> 8 -> 12 columnas) para que las figuras salgan siempre en ese orden y cada par que difiere en una sola cosa quede junto. Cuatro ejes: (A) CUANTO entra: 01 (1 col) -> 02 (2) -> 04 (5) -> 08 (8) -> 10 (12). (B) COMO se representa, feature tokens contra texto serializado, apareado en 5/8/12 columnas: 04<->05, 08<->09, 10<->11. (C) EL TEXTO hace falta?: 03 <-> 04 mide product_name cuando las tabulares ya estan. (D) PRICE, forma funcional: 04 (token lineal) <-> 12 (serializado como texto, 5 col) <-> 13 (texto, sin nombre). El bineado por cuartil dentro de category (brazos 06 y 07) se saco del proyecto el 2026-09-01 junto con bin_numeric_splits; sus corridas quedan en output/01_entrada como historia. product_name ocupa como maximo 10 subwords, asi que max_title_len 10 no trunca nada; los largos de los brazos de texto son el maximo medido con tiktoken gpt2 sobre el CSV. Corre: python main.py --config config/01_entrada.json",
   "_no_se_ablaciona_aca": "Arquitectura y capacidad (02-03), regularizacion (04), modulos (05). Tampoco el split ni el preprocesamiento: cambiarlos cambia el test y rompe la comparacion.",
-  "_selection": "REPORTE: PR-AUC estimada como Average Precision sin interpolar (sklearn.metrics.average_precision_score, via plots/pr_auc.pr_auc_score; ROC-AUC via sklearn.metrics.roc_auc_score), en el checkpoint de MAXIMA val_pr_auc. Se entrenan las 50 epocas siempre (patience 0) y despues se restaura ese checkpoint: no hay corte anticipado, la seleccion es post-hoc sobre todas las epocas. Protocolo completo y congelado en docs/PROTOCOL.md (2026-09-01). Se elige por val_pr_auc y no por val_loss porque es la metrica que se reporta: la entropia cruzada penaliza la calibracion, mientras que la AP depende solo del ordenamiento, asi que minimizar val_loss optimiza una propiedad que no se reporta (Guo et al. 2017; Soudry et al. 2018). val_loss se sigue reportando como diagnostico de sobreajuste, que es lo que pide la consigna. LIMITACION MEDIDA, va en el informe: con 131 positivos de validacion el error estandar bootstrap por consulta de la AP es 0.032-0.050 y la variacion entre epocas es 0.007-0.029, asi que la epoca elegida no es estable -- en s1b_all_text_5col el argmax cayo en la epoca 5, 5 y 47 segun la semilla. Por eso (a) el numero que se reporta es el de TEST, que no interviene en la seleccion y por lo tanto no esta sesgado por ella, no la AP de validacion en la epoca elegida, que si esta sesgada al alza por ser un maximo de estimaciones ruidosas (Jensen & Cohen 2000; Cawley & Talbot 2010), y (b) se reporta la epoca elegida por semilla y el intervalo de confianza bootstrap por consulta, y no se afirman diferencias entre brazos menores que ese intervalo. Cada corrida guarda las probabilidades de val y test de TODAS las epocas (epoch_predictions.npz), asi que la regla se puede reexaminar sin reentrenar.",
+  "_selection": "REPORTE: PR-AUC estimada como Average Precision sin interpolar (sklearn.metrics.average_precision_score via plots/pr_auc.pr_auc_score; ROC-AUC via sklearn.metrics.roc_auc_score), en el checkpoint de MINIMA val_loss. Se entrenan las 50 epocas siempre (patience 0) y al final se restaura ese checkpoint: no hay corte anticipado, la seleccion es post-hoc sobre todas las epocas. Protocolo completo en docs/PROTOCOL.md. Selecciona la perdida, evalua la metrica: la val_loss dice CUANDO empieza el sobreajuste y PR-AUC/ROC-AUC dicen QUE TAN UTIL es el clasificador. Es la regla convencional (Prechelt 1998; Goodfellow et al. 2016 Alg. 7.1 detienen sobre el error de validacion, no sobre la metrica) y hace que la curva de perdida del informe y el checkpoint reportado cuenten la misma historia. Contra maxima val_pr_auc son indistinguibles en un bake-off solo-validacion (0.7459 vs 0.7495 de AP media; 5.80 vs 6.20 de posicion media), asi que se elige por defendibilidad. COMPARACION ENTRE BRAZOS: sobre VALIDACION. Test se lee una sola vez, al final, con scripts/reselect.py --final. Se reportan las 3 semillas (media y rango), nunca la mejor. Cada corrida guarda las probabilidades de val y test de TODAS las epocas (epoch_predictions.npz).",
   "_carry_forward": "El ganador define text_column / numeric_columns / categorical_columns / max_title_len de TODOS los pasos siguientes (02-06 hoy llevan las listas de 12 columnas: actualizarlas con el ganador de aca).",
   "dataset_path": "dataset/supermarket_products.csv",
   "output_dir": "output/01_entrada",
@@ -24,12 +24,12 @@
     1234
   ],
   "_seeds": "Cada brazo se entrena una vez por semilla de inicializacion (corridas <brazo>_seed<n>); split_seed queda fijo, asi la unica variacion es el entrenamiento. Las figuras agrupan por config-menos-seed y muestran media y rango (plots/config_comparison.seed_groups). 11 brazos x 3 semillas = 33 corridas, ~75 min en CPU. IMPORTANTE: no se elige la mejor semilla, se reportan las tres (media y rango); quedarse con la mejor de tres seria una segunda seleccion sobre ruido, peor que la de epoca. --experiment <brazo> corre sus tres semillas; --experiment <brazo>_seed7 una sola.",
-  "dropout": 0.3,
+  "dropout": 0.15,
   "batch_size": 64,
   "weight_decay": 0.02,
   "early_stopping_patience": 0,
   "early_stopping_min_delta": 0.0001,
-  "early_stopping_metric": "val_pr_auc",
+  "early_stopping_metric": "val_loss",
   "activation": "relu",
   "encoding": "gpt2",
   "drop_columns": [
@@ -97,6 +97,20 @@
       }
     },
     {
+      "name": "s1_4coltexto",
+      "overrides": {
+        "text_column": [
+          "title_tag",
+          "category",
+          "allergens",
+          "price"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [],
+        "max_title_len": 40
+      }
+    },
+    {
       "name": "s1_04_5col_tokens",
       "_eje": "BASE · 5 columnas como feature tokens",
       "_comment": "LA BASE de toda la comparacion. Las 5 columnas con señal segun el EDA, una posicion cada una: [CLS] + 10 de texto + price + 3 categoricas = 15 posiciones. Es el brazo contra el que se miden los ejes B, C y D.",
@@ -117,49 +131,6 @@
         "numeric_columns": [],
         "categorical_columns": [],
         "max_title_len": 40
-      }
-    },
-    {
-      "name": "s1_06_5col_precio_bin",
-      "_eje": "D · price: bineado por cuartil",
-      "_comment": "Igual a s1_04 pero price entra como CATEGORICA: el cuartil de su precio dentro de su category, con bordes ajustados en train y aplicados congelados a val/test. Sin token lineal. Es la forma funcional que el EDA pide (U invertida) y que x*w+b no puede representar: el cuartil mas caro del tier ALTO compra 0.46 y el token lineal predice 0.74. 15 posiciones.",
-      "overrides": {
-        "bin_columns": [
-          {
-            "column": "price",
-            "bins": 4,
-            "within": "category",
-            "name": "price_bin"
-          }
-        ],
-        "categorical_columns": [
-          "title_tag",
-          "category",
-          "allergens",
-          "price_bin"
-        ],
-        "numeric_columns": []
-      }
-    },
-    {
-      "name": "s1_07_5col_precio_bin_y_lineal",
-      "_eje": "D · price: bineado + lineal",
-      "_comment": "Las dos representaciones de price a la vez: el cuartil como categorica y el valor z-scoreado como token lineal. 16 posiciones. Contra s1_06 dice si el valor fino agrega algo por encima del cuartil.",
-      "overrides": {
-        "bin_columns": [
-          {
-            "column": "price",
-            "bins": 4,
-            "within": "category",
-            "name": "price_bin"
-          }
-        ],
-        "categorical_columns": [
-          "title_tag",
-          "category",
-          "allergens",
-          "price_bin"
-        ]
       }
     },
     {
@@ -235,6 +206,41 @@
         "numeric_columns": [],
         "categorical_columns": [],
         "max_title_len": 100
+      }
+    },
+    {
+      "name": "s1_12_5col_precio_texto",
+      "_eje": "D · price: serializado como texto",
+      "_comment": "AGREGADO (2026-09-01), despues de que los 11 brazos originales ya estaban corridos y reportados: va ultimo para no tocar el orden de las figuras del paso. Cuarto punto del eje D, y el que faltaba para contestar 'y por que no meter price como texto?'. s1_05 ya serializa price, pero serializa TODAS las columnas, asi que no distingue 'el texto sirve para price' de 'el texto sirve para todo'. Aca solo price cambia de puerta: product_name + price serializados, las otras tres siguen siendo tokens categoricos. Largo maximo medido con tiktoken gpt2 sobre el CSV: 19 subwords (media 15,1), max_title_len 20 no trunca; la secuencia son 24 posiciones (1 CLS + 20 slots de texto + 3 categoricas), de las que a lo sumo 19 de texto llevan un subword real. Lo que se espera: gpt2 parte 'price: 12.47' en ['price', ':', ' 12', '.', '47'] SIEMPRE, o sea que el texto ya es un bineado, pero global (34 valores de parte entera, no dentro de category) y con 100 valores de centavos que son ruido puro (BTR del tier ALTO por ultimo digito: 0,58 a 0,699, sin patron). Ni la parte entera ni los centavos tienen orden entre si. Se agrego despues de que el paso ya estaba corrido y reportado, y test sigue cerrado: se reporta como post-hoc. Es respaldo para la defensa.",
+      "overrides": {
+        "text_column": [
+          "product_name",
+          "price"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [
+          "title_tag",
+          "category",
+          "allergens"
+        ],
+        "max_title_len": 20
+      }
+    },
+    {
+      "name": "s1_13_4col_precio_texto",
+      "_eje": "D · price: texto, SIN product_name",
+      "_comment": "AGREGADO (2026-09-01), despues de que el paso ya estaba corrido. Es s1_03 con price cambiando de puerta y NADA mas: mismas 3 categoricas como embeddings, sin product_name, price como texto en vez de token lineal. Existe porque los dos hallazgos del paso apuntan en la misma direccion y nunca se combinaron: (1) el texto no aporta cuando las tabulares estan (s1_03 - s1_04 = +0.043, e s1_03 tiene la MENOR val_loss de todo el paso, 0.1405, y practicamente no sobreajusta, deriva 0.0040); (2) price como texto le gana al token lineal (s1_12 - s1_04 = +0.037, P(d>0)=0.97). Este brazo aplica las dos a la vez. Contra s1_03 es una comparacion de UN SOLO FACTOR -- la representacion de price -- porque todo lo demas es identico. Largo medido con tiktoken gpt2 sobre el CSV: TODAS las filas dan exactamente 3 subwords ('5.53' -> ['5', '.', '53']), asi que max_title_len 3 no trunca; la secuencia son 7 posiciones (1 CLS + 3 de texto + 3 categoricas) contra las 5 de s1_03. Ojo: con UNA sola columna de texto build_text_column no serializa 'price: 5.53' sino el valor pelado '5.53', asi que aca no hay tokens de nombre de campo, a diferencia de s1_12. Es post-hoc: se reporta como tal, y test sigue cerrado.",
+      "overrides": {
+        "text_column": [
+          "price"
+        ],
+        "numeric_columns": [],
+        "categorical_columns": [
+          "title_tag",
+          "category",
+          "allergens"
+        ],
+        "max_title_len": 3
       }
     }
   ]

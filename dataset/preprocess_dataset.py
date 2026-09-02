@@ -163,8 +163,11 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
 
     # splits = split_dataset_by_bought_true(df, config_data)
     splits = split_dataset(df, config_data)
-    # Before normalize_splits, which overwrites the raw values the bins are cut from.
-    splits = bin_numeric_splits(splits, config_data)
+    # CHANGED (2026-09-01): bin_numeric_splits ran here, cutting price into
+    # per-category quartiles as a categorical. Removed with the s1_06/s1_07 arms;
+    # price's functional form is probed through the text door instead (s1_12/s1_13).
+    # To bring it back: git show 1a05a8a:dataset/preprocess_dataset.py.
+
     # Keep the pre-scaling values around for error analysis. A z-scored price of
     # -0.99 is the right input for the numeric tokenizer and the wrong thing to
     # read when eyeballing which products the model gets wrong, and the scaling
@@ -189,79 +192,6 @@ def get_data_processed(config: dict | None = None) -> Dict[str, pd.DataFrame]:
 def drop_columns(df: pd.DataFrame, config: dict | None = None) -> pd.DataFrame:
     """Drop the columns specified in config.json."""
     return df.drop(columns=config_columns("drop_columns", config), errors="ignore")
-
-def bin_numeric_splits(
-    splits: Dict[str, pd.DataFrame], config: dict | None = None
-) -> Dict[str, pd.DataFrame]:
-    """Add quantile-bin categorical columns, with the bin edges fitted on train only.
-
-    config.json::
-
-        "bin_columns": [
-            {"column": "price", "bins": 4, "within": "category", "name": "price_bin"}
-        ]
-
-    produces a string column ``price_bin`` with values ``Q1..Q4``: the quartile of
-    the row's price among the TRAIN prices of its own category. List the new name
-    in ``categorical_columns`` and it reaches the model as one embedding token,
-    like any other categorical.
-
-    Why this exists: the numeric tokenizer is ``x * w + b``, a linear function of
-    the value, and the EDA found price's effect is an inverted U within category
-    (cheapest and most expensive buy less). Step 1 measured the consequence: on
-    the top price quartile of the high tier the linear token predicts 0.74 for a
-    real rate of 0.46. A bin per quartile gives the model one free vector per
-    price band, which can take any shape.
-
-    ``within`` is optional; without it the edges are global. Groups too small to
-    cut (fewer rows than bins) and groups unseen in train fall back to the global
-    edges. Fitting on train and freezing is the same leakage rule normalize_splits
-    follows: validation and test values never move an edge.
-    """
-    config_data = config or load_config()
-    specs = config_data.get("bin_columns") or []
-    if not specs:
-        return splits
-
-    train = splits["train"]
-    edges_used: dict[str, dict] = {}
-    for spec in specs:
-        column = spec["column"]
-        bins = int(spec.get("bins", 4))
-        within = spec.get("within")
-        name = spec.get("name", f"{column}_bin")
-        cut_points = np.linspace(0.0, 1.0, bins + 1)[1:-1]
-
-        def fit(values: pd.Series) -> np.ndarray:
-            return np.quantile(pd.to_numeric(values, errors="coerce").dropna(), cut_points)
-
-        global_edges = fit(train[column])
-        group_edges = {
-            group: fit(values)
-            for group, values in (train.groupby(within)[column] if within else [])
-            if len(values) >= bins
-        }
-        edges_used[name] = {
-            "column": column, "within": within,
-            "global": global_edges.tolist(),
-            "groups": {str(group): edges.tolist() for group, edges in group_edges.items()},
-        }
-
-        for split in splits.values():
-            values = pd.to_numeric(split[column], errors="coerce").to_numpy(dtype=float)
-            index = np.zeros(len(split), dtype=int)
-            if within:
-                for group, rows in split.groupby(within).indices.items():
-                    edges = group_edges.get(group, global_edges)
-                    index[rows] = np.searchsorted(edges, values[rows], side="right")
-            else:
-                index = np.searchsorted(global_edges, values, side="right")
-            split[name] = [f"Q{position + 1}" for position in index]
-
-    for split in splits.values():
-        split.attrs["bin_edges"] = edges_used
-    return splits
-
 
 def normalize_splits(
     splits: Dict[str, pd.DataFrame], config: dict | None = None

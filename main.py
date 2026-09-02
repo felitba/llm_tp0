@@ -20,7 +20,7 @@ from plots.pr_auc import pr_auc_score
 from plots.roc_auc import roc_auc_score
 from metrics.error_analysis import build_error_analysis, error_summary, write_error_analysis
 from metrics.run_results import (
-	RunResults, output_dir_from_config, run_dir, save_run, write_summary_csv,
+	RunResults, experiments_dir, output_dir_from_config, run_dir, save_run, write_summary_csv,
 )
 from model.checkpoint import save_checkpoint
 from model.encoder_only_model import EncoderOnlyModel
@@ -197,6 +197,15 @@ def train_one_experiment(
 			cls_output_path=cls_output_path if print_cls_btr else None, epoch=epoch,
 		)
 		test_epoch = run_epoch(model, loaders.test, criterion, device)
+		# CHANGED (2026-09-02): the reported train curve comes from a second,
+		# gradient-free pass in eval mode, so train and val are measured under the
+		# same conditions (dropout off, end-of-epoch weights). The in-training
+		# loss (dropout on, averaged while the weights move) sits ~0.006 above the
+		# fair number and made the curves cross on arms that barely overfit; it is
+		# kept as train_loss_optim because it is what the optimizer actually sees
+		# (the lr divergence diagnosis reads it). To go back: drop this pass and
+		# read train_metrics for history/epoch_metrics again.
+		train_eval = run_epoch(model, loaders.train, criterion, device)
 		epoch_val_probs.append(np.asarray(val_metrics["probs"], dtype=np.float32))
 		epoch_test_probs.append(np.asarray(test_epoch["probs"], dtype=np.float32))
 		if not eval_reference:
@@ -206,13 +215,14 @@ def train_one_experiment(
 				"test_labels": np.asarray(test_epoch["labels"], dtype=np.int8),
 				"test_row_ids": np.asarray(test_epoch["row_ids"], dtype=np.int64),
 			}
-		history["train"].append(float(train_metrics["loss"]))
+		history["train"].append(float(train_eval["loss"]))
 		history["val"].append(float(val_metrics["loss"]))
 		epoch_metrics.append({
 			"epoch": epoch,
-			"train_loss": float(train_metrics["loss"]),
-			"train_roc_auc": float(train_metrics["roc_auc"]),
-			"train_pr_auc": float(train_metrics["pr_auc"]),
+			"train_loss": float(train_eval["loss"]),
+			"train_loss_optim": float(train_metrics["loss"]),
+			"train_roc_auc": float(train_eval["roc_auc"]),
+			"train_pr_auc": float(train_eval["pr_auc"]),
 			"val_loss": float(val_metrics["loss"]),
 			"val_roc_auc": float(val_metrics["roc_auc"]),
 			"val_pr_auc": float(val_metrics["pr_auc"]),
@@ -220,7 +230,7 @@ def train_one_experiment(
 
 		print(
 			f"[{name}] Epoch {epoch:02d}/{epochs} | "
-			f"train_loss={train_metrics['loss']:.4f} val_loss={val_metrics['loss']:.4f} | "
+			f"train_loss={train_eval['loss']:.4f} val_loss={val_metrics['loss']:.4f} | "
 			f"val_roc_auc={val_metrics['roc_auc']:.4f} val_pr_auc={val_metrics['pr_auc']:.4f}"
 		)
 
@@ -431,6 +441,13 @@ def parse_args() -> argparse.Namespace:
 		help="Skip saving loss/PR/ROC plots.",
 	)
 	parser.add_argument(
+		"--no-error-patterns",
+		dest="error_patterns",
+		action="store_false",
+		help="Skip the batch-level error-pattern report (output/<batch>/error_patterns.txt). "
+		     "It runs once at the end of a multi-run batch and reads test.",
+	)
+	parser.add_argument(
 		"--save-weights",
 		action="store_true",
 		help="Also write <output_dir>/<name>/model.pt (~20 MB per experiment).",
@@ -475,6 +492,29 @@ def main() -> None:
 	if not args.no_plots:
 		for combined_path in plot_runs_combined(runs):
 			print(f"Combined plot written to: {combined_path}")
+
+	# Batch-level error analysis, once the whole batch exists: which test rows
+	# every arm gets wrong and what they have in common. Needs the full batch
+	# (it scores by consensus across arms), so it cannot run per experiment, and
+	# it is written to a file rather than stdout because 33 runs of training
+	# scroll it away. Never fatal: a batch that took an hour to train must not be
+	# lost to a reporting bug.
+	#
+	# It reads TEST. That is fine as the closing step of a reporting run -- the
+	# protocol in docs/PROTOCOL.md is frozen before this point, so nothing here
+	# can feed back into a modelling decision. What it must not become is a thing
+	# you read between runs while still changing the model.
+	if args.error_patterns and len(runs) > 1 and args.config:
+		try:
+			from scripts.error_patterns import write_figure, write_report  # noqa: PLC0415
+
+			batch_dir = experiments_dir()
+			print(f"Error patterns written to: {write_report(args.config, batch_dir / 'error_patterns.txt')}")
+			drawn = write_figure(args.config, batch_dir / "error_patterns.jpg")
+			if drawn:
+				print(f"Error patterns figure written to: {drawn}")
+		except Exception as error:  # noqa: BLE001  (reporting must never kill a batch)
+			print(f"Error-pattern report skipped ({type(error).__name__}: {error})")
 
 
 if __name__ == "__main__":

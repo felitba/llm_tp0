@@ -16,12 +16,18 @@
   "test_split": 0.1,
   "split_seed": 42,
   "seed": 42,
+  "seeds": [
+    42,
+    7,
+    1234
+  ],
+  "_seeds": "Cada brazo se entrena una vez por semilla de inicializacion (42, 7, 1234); split_seed queda fijo, asi la unica variacion es el entrenamiento. Los brazos se comparan por la MEDIA de val_pr_auc / val_roc_auc entre las tres semillas, mostrando siempre los valores individuales y el rango: nunca se elige la mejor semilla. Una sola semilla queda reservada para pruebas exploratorias que no sostienen ninguna conclusion de la ablacion. 3 brazos x 3 semillas = 9 corridas.",
   "dropout": 0.3,
   "batch_size": 64,
   "weight_decay": 0.02,
   "early_stopping_patience": 0,
   "early_stopping_min_delta": 0.0001,
-  "early_stopping_metric": "val_pr_auc",
+  "early_stopping_metric": "val_loss",
   "activation": "relu",
   "encoding": "gpt2",
   "drop_columns": [

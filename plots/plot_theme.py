@@ -18,6 +18,7 @@ from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.transforms import ScaledTranslation
 
 # ── Paleta: Okabe-Ito ─────────────────────────────────────────────────────────
@@ -38,7 +39,13 @@ LIGHT    = "#e0eef6"   # relleno suave: banda de confianza, área bajo la curva
 INK      = "#1a1a1a"   # títulos y etiquetas de eje
 BODY     = "#404040"   # ticks, texto secundario
 MUTED    = "#737373"   # anotaciones y etiquetas menores
-BASELINE = "#999999"   # baselines y series de referencia (siempre punteadas)
+BASELINE = "#999999"   # líneas de referencia, detrás del dato (siempre punteadas)
+# Gris para una serie de referencia dibujada COMO DATO: marcador, barra de error,
+# línea llena. BASELINE está calibrado para una punteada de fondo y, al lado del
+# azul y el naranja de la paleta, un marcador en #999999 se lee como apagado —
+# como si esa serie importara menos, cuando suele ser el piso contra el que se
+# mide todo lo demás. Contraste 7.0:1 sobre blanco.
+REFERENCE_SERIES = "#595959"
 BORDER   = "#cccccc"   # grilla y spines
 SURFACE  = "#ffffff"   # fondo
 POS      = GREEN       # mejora
@@ -56,6 +63,12 @@ NEGATIVE = BASELINE    # bought = 0
 POSITIVE_LIGHT = "#d6efe7"
 NEGATIVE_LIGHT = "#ededed"
 
+# Relleno neutro, sin color de serie: banda de rango entre épocas, región de
+# empate, barra de la cantidad real contra la que se compara una predicción.
+# Distinto de LIGHT, que tira a azul porque acompaña al acento; acá el relleno no
+# debe leerse como "la serie azul".
+NEUTRAL_LIGHT = "#ededed"
+
 # Splits, cuando hay que distinguir train/val/test en una misma figura.
 # Azul y naranja son los dos primeros de la paleta y el par seguro clásico: train
 # y validation se dibujan como dos líneas finas superpuestas y cualquier par de
@@ -63,6 +76,21 @@ NEGATIVE_LIGHT = "#ededed"
 SPLIT_COLORS = {"train": BLUE, "validation": ORANGE, "test": GREEN}
 
 DASH = (0, (4, 3))   # patrón único para baselines y líneas de referencia
+
+# Rampa secuencial para magnitudes sobre una grilla (heatmap): un solo matiz,
+# claro → oscuro, del papel al acento profundo. Un solo tono a propósito: en una
+# rampa la luminosidad es lo único que ordena, así el orden sobrevive al
+# daltonismo y a una impresión en grises; un arcoíris no ordena nada.
+SEQUENTIAL = LinearSegmentedColormap.from_list("secuencial_azul", ["#f2f7fb", DEEP])
+
+
+def sequential_text_color(fraction):
+	"""Tinta legible sobre una celda de SEQUENTIAL pintada en ``fraction`` (0..1).
+
+	El corte en 0.55 es donde la rampa cruza la luminosidad media: más oscuro
+	que eso, la tinta INK deja de contrastar y el texto pasa a blanco.
+	"""
+	return SURFACE if fraction > 0.55 else INK
 
 # Tipografía: la de un paper, no la de una marca. Helvetica y Arial están en
 # macOS y Windows; DejaVu Sans es el default de matplotlib y cierra el respaldo
@@ -179,7 +207,7 @@ def apply_theme(font=None, base=10):
 	})
 
 
-def legend_top_left(axes, ncols=None, gap=6.0, subtitle=None):
+def legend_top_left(axes, ncols=None, gap=6.0, subtitle=None, inside=False):
 	"""Encabezado del ax, de arriba a abajo: título, subtítulo, leyenda, datos.
 
 	La leyenda va afuera del área de datos: adentro se apoya sobre las curvas o
@@ -198,7 +226,15 @@ def legend_top_left(axes, ncols=None, gap=6.0, subtitle=None):
 	offset = gap
 	legend = None
 
-	if handles:
+	if handles and inside:
+		# Dentro del area de datos, en caja, arriba a la derecha. Sirve cuando la
+		# figura tiene una esquina libre estable -- una curva de perdida decae
+		# hacia abajo a la derecha, asi que la de arriba siempre lo esta -- y
+		# devuelve al dato todo el alto que la leyenda apilada se comia.
+		legend = axes.legend(handles, labels, loc="upper right",
+		                     ncols=ncols if ncols else 1, frameon=True)
+		legend.set_zorder(5)
+	elif handles:
 		legend = axes.legend(
 			handles, labels,
 			loc="lower left",

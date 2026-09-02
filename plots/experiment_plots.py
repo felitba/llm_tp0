@@ -14,7 +14,6 @@ import numpy as np
 
 from plots.calibration import plot_btr_by_query, plot_reliability, plot_score_histogram
 from plots.config_comparison import (
-	BASELINE_PR_AUC,
 	plot_cost_vs_score,
 	plot_metric_by_epoch,
 	plot_seed_spread,
@@ -49,13 +48,11 @@ def plot_run(results: RunResults) -> list[Path]:
 	output_dir = results.directory
 	output_paths = []
 	caption = training_hyperparameters(results.config)
-	best_epoch = results.selection.get("best_epoch")
 
 	if results.history.get("train"):
 		figure, _ = plot_training_progress(
 			results.history,
-			best_epoch=best_epoch,
-			title=f"{results.name} — Training vs. Validation Loss",
+			title=f"{results.name} — Pérdida: entrenamiento vs. validación",
 			hyperparameters=caption,
 		)
 		output_paths.append(save(figure, output_dir / "loss.jpg"))
@@ -65,11 +62,9 @@ def plot_run(results: RunResults) -> list[Path]:
 	if results.epoch_metrics:
 		figure, _ = plot_pr_auc_by_epoch(
 			results.epoch_metrics,
-			best_epoch=best_epoch,
-			title=f"{results.name} — PR-AUC by epoch",
+			title=f"{results.name} — PR-AUC por época",
 			hyperparameters=caption,
 			chance_level=positive_rate(results.labels) if len(results.labels) else None,
-			baseline_level=BASELINE_PR_AUC,
 		)
 		output_paths.append(save(figure, output_dir / "pr_auc_by_epoch.jpg"))
 
@@ -89,14 +84,15 @@ def plot_run(results: RunResults) -> list[Path]:
 	# validation scores were persisted.
 	calibration_split = "validation" if "validation" in results.split_predictions else "test"
 	cal_labels, cal_probs = results.split_predictions.get(calibration_split, (labels, probs))
+	split_label = "validación" if calibration_split == "validation" else "test"
 	figure, _ = plot_reliability(
 		np.asarray(cal_labels, dtype=int), np.asarray(cal_probs, dtype=float),
-		title=f"{results.name} — Reliability diagram ({calibration_split})",
+		title=f"{results.name} — Diagrama de confiabilidad ({split_label})",
 		hyperparameters=caption,
 	)
 	output_paths.append(save(figure, output_dir / "calibration.jpg"))
 	figure, _ = plot_score_histogram(
-		labels, probs, title=f"{results.name} — Score distribution by class",
+		labels, probs, title=f"{results.name} — Distribución de scores por clase",
 		hyperparameters=caption,
 	)
 	output_paths.append(save(figure, output_dir / "score_histogram.jpg"))
@@ -114,7 +110,7 @@ def plot_run(results: RunResults) -> list[Path]:
 
 	drawn = plot_btr_by_query(
 		results.query_ids, labels, probs,
-		title=f"{results.name} — BTR by query: predicted vs. observed",
+		title=f"{results.name} — BTR por query: predicho vs. observado",
 		hyperparameters=caption,
 	)
 	if drawn:
@@ -149,15 +145,25 @@ def plot_runs_combined(runs: Sequence[RunResults], suffix: str = "") -> list[Pat
 	# The test curves say which one won; these say why, which is where capacity
 	# and overfitting can be told apart.
 	for metric_key, y_label, title, limits, filename in (
-		("val_loss", "Validation loss", "Validation loss by configuration",
+		("val_loss", "Pérdida", "Pérdida por configuración (validación)",
 		 None, f"val_loss_all_configs{tail}.jpg"),
-		("val_pr_auc", "Validation PR-AUC", "Validation PR-AUC by configuration",
-		 (0.0, 1.0), f"val_pr_auc_all_configs{tail}.jpg"),
+		# No forced 0..1 here: every arm sits between 0.6 and 0.85, so a full-range
+		# axis spends 70% of its height on empty space.
+		("val_pr_auc", "PR-AUC", "PR-AUC por configuración (validación)",
+		 None, f"val_pr_auc_all_configs{tail}.jpg"),
 	):
 		drawn = plot_metric_by_epoch(runs, metric_key, y_label, title, subtitle, limits)
 		if drawn:
 			output_paths.append(save(drawn[0], experiments_dir() / filename))
 
+	# The VALIDATION versions of these -- val_scores_all_configs.jpg and
+	# val_seed_spread_all_configs.jpg, the pair the ablation is actually decided
+	# on -- are deliberately NOT drawn here. They belong to scripts/reselect.py,
+	# which is the only caller that knows which epoch the checkpoint rule picked;
+	# a run's validation_predictions.csv still describes whatever checkpoint it
+	# was saved with, and reselecting without --apply is exactly when the two
+	# disagree. Drawing them from here would let a replot silently overwrite a
+	# correct figure with a stale one.
 	for plot_fn, filename in (
 		(plot_test_scores, f"test_scores_all_configs{tail}.jpg"),
 		(plot_cost_vs_score, f"cost_vs_score_all_configs{tail}.jpg"),

@@ -1,0 +1,90 @@
+{
+  "_step": "03",
+  "_comment": "PASO 3 - Cuanta capacidad conviene. Un factor por vez desde la base chica, que es lo que pide la consigna ('arquitectura base pequena ... luego ir aumentando la complejidad'), y NO un grid: un grid de 60+ celdas elegidas por el maximo de val_pr_auc es el maximo de 60 tiradas ruidosas sobre un solo split de validacion y no reproduce en test. n_heads usa {2,4,8} porque divide a 64, 96 y 128; con 6 heads las celdas de 64 y 128 ni siquiera corren (nn.MultiheadAttention exige d_model %% n_heads == 0). dim_feedforward se varia como RAZON de d_model (1x/2x/4x) para que las celdas signifiquen lo mismo a distinto ancho.",
+  "_carry_forward": "Del paso 2: use_encoder y pooling ganadores, ademas de las columnas del paso 1.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/03_capacidad",
+  "d_model": 96,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 192,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "seeds": [
+    42,
+    7,
+    1234
+  ],
+  "_seeds": "Cada brazo se entrena una vez por semilla de inicializacion (42, 7, 1234); split_seed queda fijo, asi la unica variacion es el entrenamiento. Los brazos se comparan por la MEDIA de val_pr_auc / val_roc_auc entre las tres semillas, mostrando siempre los valores individuales y el rango: nunca se elige la mejor semilla. Una sola semilla queda reservada para pruebas exploratorias que no sostienen ninguna conclusion de la ablacion. 10 brazos x 3 semillas = 30 corridas.",
+  "dropout": 0.15,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_loss",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price",
+    "filter_price_min",
+    "filter_price_max",
+    "net_weight_oz",
+    "nutrition_score"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag"
+  ],
+  "numeric_columns": [
+    "price"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 0,
+  "experiments": [
+    {
+      "name": "d64_ff2x_h4_n2",
+      "_comment": "Mas angosto.",
+      "overrides": {
+        "d_model": 64,
+        "dim_feedforward": 128
+      }
+    },
+    {
+      "name": "d96_ff2x_h4_n2",
+      "_comment": "Medio.",
+      "overrides": {
+        "d_model": 96,
+        "dim_feedforward": 192
+      }
+    },
+    {
+      "name": "d128_ff2x_h4_n2",
+      "_comment": "Mas ancho.",
+      "overrides": {
+        "d_model": 128,
+        "dim_feedforward": 256
+      }
+    }
+  ]
+}

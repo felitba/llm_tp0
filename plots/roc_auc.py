@@ -66,9 +66,9 @@ def plot_roc_auc(
 	curve = replace(roc_curve(y_true, y_scores), auc=roc_auc_score(y_true, y_scores))
 	return plot_threshold_curve(
 		curve=curve,
-		x_label="False Positive Rate",
-		y_label="True Positive Rate",
-		title="ROC Curve",
+		x_label="Tasa de falsos positivos",
+		y_label="Tasa de verdaderos positivos",
+		title="Curva ROC",
 		auc_label="ROC AUC",
 		show_random_baseline=True,
 	)
@@ -89,9 +89,9 @@ def plot_roc_auc_by_config(
 	curves.sort(key=lambda item: item[1].auc, reverse=True)
 	return plot_combined_threshold_curves(
 		curves=curves,
-		x_label="False Positive Rate",
-		y_label="True Positive Rate",
-		title="ROC Curve by Configuration",
+		x_label="Tasa de falsos positivos",
+		y_label="Tasa de verdaderos positivos",
+		title="Curva ROC por configuración",
 		auc_label="AUC",
 		show_random_baseline=True,
 	)

@@ -1,0 +1,78 @@
+{
+  "_step": "03",
+  "_comment": "PASO 3a - Cuanta capacidad conviene: MATRIZ num_layers x n_heads (3x3 = 9 celdas, 27 corridas con 3 semillas, ~15 min en CPU). CHANGED (2026-09-01): antes eran 6 brazos de un-factor-por-vez, y este comentario argumentaba explicitamente contra un grid. El argumento sigue siendo valido para un grid GRANDE elegido por el maximo (60+ celdas sobre un solo split de validacion = el maximo de 60 tiradas ruidosas, no reproduce en test), pero no para 9 celdas, y la matriz compra algo que un-factor-por-vez no puede: INTERACCIONES. Un factor por vez solo responde 'que pasa si muevo heads con 2 capas'; si mas heads sirven unicamente con mas capas, la matriz lo ve y el barrido lineal no. COMO SE LEE: la pregunta NO es que celda gana. Con el IC del paso 1 (+-0.045 sobre la diferencia pareada) es casi seguro que las 9 celdas empatan, y ESA es la conclusion reportable: la superficie es plana, la capacidad no es el cuello de botella de este dataset. Elegir la mejor celda de 9 seria la misma seleccion sobre ruido que el protocolo prohibe para las semillas. Si de verdad hay que elegir, se elige la MAS CHICA que empata con la mejor (navaja de Occam declarada de antemano, no post-hoc). n_heads {2,4,8} son validas porque las tres dividen a d_model=64 (el d_model heredado del paso d_model/ffd); config/experiments.py rechaza las celdas no construibles con un error que nombra la celda, mirando tambien el d_model de la base. CHANGED (2026-09-01): el eje era {2,4,6}, valido cuando la base tenia d_model=96; al heredar d_model=64 la columna nh6 dejo de ser construible (64 % 6 != 0) y se reemplazo por nh8. d_model y dim_feedforward se ablacionan aparte en 03_capacidad_dmodelffd.json.",
+  "_carry_forward": "Del paso 2: use_encoder y pooling ganadores, ademas de las columnas del paso 1.",
+  "dataset_path": "dataset/supermarket_products.csv",
+  "output_dir": "output/03a_capacidad_nheads",
+  "d_model": 64,
+  "vocab_size": 50257,
+  "n_heads": 4,
+  "num_layers": 2,
+  "dim_feedforward": 128,
+  "learning_rate": 0.0003,
+  "epochs": 50,
+  "train_split": 0.8,
+  "validation_split": 0.1,
+  "test_split": 0.1,
+  "split_seed": 42,
+  "seed": 42,
+  "seeds": [
+    42,
+    7,
+    1234
+  ],
+  "_seeds": "Cada celda se entrena una vez por semilla (42, 7, 1234); split_seed queda fijo, asi la unica variacion es el entrenamiento. Se comparan por la MEDIA entre las tres semillas, mostrando siempre los valores individuales y el rango; nunca se elige la mejor semilla. 9 celdas x 3 semillas = 27 corridas.",
+  "dropout": 0.3,
+  "batch_size": 64,
+  "weight_decay": 0.02,
+  "early_stopping_patience": 0,
+  "early_stopping_min_delta": 0.0001,
+  "early_stopping_metric": "val_loss",
+  "activation": "relu",
+  "encoding": "gpt2",
+  "drop_columns": [
+    "title",
+    "description",
+    "filter_category",
+    "filter_storage_type",
+    "package_size",
+    "unit_of_measure",
+    "dimensions_in",
+    "timestamp",
+    "cart",
+    "ingredients"
+  ],
+  "normalize_columns": [
+    "price"
+  ],
+  "categorical_columns": [
+    "category",
+    "allergens",
+    "title_tag"
+  ],
+  "numeric_columns": [
+    "price"
+  ],
+  "text_column": [
+    "product_name"
+  ],
+  "max_title_len": 0,
+  "experiments": [
+    {
+      "name": "cap",
+      "_comment": "Matriz completa profundidad x cabezas. Los nombres salen cap_nl<capas>_nh<heads>.",
+      "matrix": {
+        "num_layers": [
+          1,
+          2,
+          3
+        ],
+        "n_heads": [
+          2,
+          4,
+          8
+        ]
+      }
+    }
+  ]
+}
